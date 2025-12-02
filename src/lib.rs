@@ -18,7 +18,6 @@ pub use worker::Worker;
 // Re-export async_trait for convenience
 pub use async_trait::async_trait;
 
-/// Returns the migrator for running database migrations.
-pub fn make_migrator() -> sqlx::migrate::Migrator {
-    sqlx::migrate!("src/postgres/migrations")
-}
+/// Static migrator for running database migrations.
+/// Used by #[sqlx::test] and for manual migration runs.
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("src/postgres/migrations");
