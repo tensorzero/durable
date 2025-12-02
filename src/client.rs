@@ -1,0 +1,277 @@
+use serde::Serialize;
+use serde_json::Value as JsonValue;
+use sqlx::PgPool;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use uuid::Uuid;
+
+use crate::task::{Task, TaskRegistry, TaskWrapper};
+use crate::types::{SpawnOptions, SpawnResult, SpawnResultRow, WorkerOptions};
+use crate::worker::Worker;
+
+/// The main client for interacting with durable workflows.
+pub struct Durable {
+    pool: PgPool,
+    owns_pool: bool,
+    queue_name: String,
+    default_max_attempts: u32,
+    registry: Arc<RwLock<TaskRegistry>>,
+}
+
+/// Builder for configuring a Durable client.
+pub struct DurableBuilder {
+    database_url: Option<String>,
+    pool: Option<PgPool>,
+    queue_name: String,
+    default_max_attempts: u32,
+}
+
+impl DurableBuilder {
+    pub fn new() -> Self {
+        Self {
+            database_url: None,
+            pool: None,
+            queue_name: "default".to_string(),
+            default_max_attempts: 5,
+        }
+    }
+
+    /// Set database URL (will create a new connection pool)
+    pub fn database_url(mut self, url: impl Into<String>) -> Self {
+        self.database_url = Some(url.into());
+        self
+    }
+
+    /// Use an existing connection pool (Durable will NOT close it)
+    pub fn pool(mut self, pool: PgPool) -> Self {
+        self.pool = Some(pool);
+        self
+    }
+
+    /// Set the default queue name (default: "default")
+    pub fn queue_name(mut self, name: impl Into<String>) -> Self {
+        self.queue_name = name.into();
+        self
+    }
+
+    /// Set default max attempts for spawned tasks (default: 5)
+    pub fn default_max_attempts(mut self, attempts: u32) -> Self {
+        self.default_max_attempts = attempts;
+        self
+    }
+
+    /// Build the Durable client
+    pub async fn build(self) -> anyhow::Result<Durable> {
+        let (pool, owns_pool) = if let Some(pool) = self.pool {
+            (pool, false)
+        } else {
+            let url = self
+                .database_url
+                .or_else(|| std::env::var("DURABLE_DATABASE_URL").ok())
+                .unwrap_or_else(|| "postgresql://localhost/durable".to_string());
+            (PgPool::connect(&url).await?, true)
+        };
+
+        Ok(Durable {
+            pool,
+            owns_pool,
+            queue_name: self.queue_name,
+            default_max_attempts: self.default_max_attempts,
+            registry: Arc::new(RwLock::new(HashMap::new())),
+        })
+    }
+}
+
+impl Default for DurableBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Durable {
+    /// Create a new client with default settings
+    pub async fn new(database_url: &str) -> anyhow::Result<Self> {
+        DurableBuilder::new()
+            .database_url(database_url)
+            .build()
+            .await
+    }
+
+    /// Access the builder for custom configuration
+    pub fn builder() -> DurableBuilder {
+        DurableBuilder::new()
+    }
+
+    /// Get a reference to the underlying connection pool
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
+    /// Get the queue name this client is configured for
+    pub fn queue_name(&self) -> &str {
+        &self.queue_name
+    }
+
+    /// Register a task type. Required before spawning or processing.
+    pub async fn register<T: Task>(&self) -> &Self {
+        let mut registry = self.registry.write().await;
+        registry.insert(T::NAME.to_string(), Arc::new(TaskWrapper::<T>::new()));
+        self
+    }
+
+    /// Spawn a task (type-safe version)
+    pub async fn spawn<T: Task>(&self, params: T::Params) -> anyhow::Result<SpawnResult> {
+        self.spawn_with_options::<T>(params, SpawnOptions::default())
+            .await
+    }
+
+    /// Spawn a task with options (type-safe version)
+    pub async fn spawn_with_options<T: Task>(
+        &self,
+        params: T::Params,
+        options: SpawnOptions,
+    ) -> anyhow::Result<SpawnResult> {
+        self.spawn_by_name(T::NAME, serde_json::to_value(&params)?, options)
+            .await
+    }
+
+    /// Spawn a task by name (dynamic version for unregistered tasks)
+    pub async fn spawn_by_name(
+        &self,
+        task_name: &str,
+        params: JsonValue,
+        options: SpawnOptions,
+    ) -> anyhow::Result<SpawnResult> {
+        let queue = options.queue.as_deref().unwrap_or(&self.queue_name);
+        let max_attempts = options.max_attempts.unwrap_or(self.default_max_attempts);
+
+        let db_options = self.serialize_spawn_options(&options, max_attempts);
+
+        let query = "SELECT task_id, run_id, attempt
+             FROM durable.spawn_task($1, $2, $3, $4)";
+
+        let row: SpawnResultRow = sqlx::query_as(query)
+            .bind(queue)
+            .bind(task_name)
+            .bind(&params)
+            .bind(&db_options)
+            .fetch_one(&self.pool)
+            .await?;
+
+        Ok(SpawnResult {
+            task_id: row.task_id,
+            run_id: row.run_id,
+            attempt: row.attempt,
+        })
+    }
+
+    fn serialize_spawn_options(&self, options: &SpawnOptions, max_attempts: u32) -> JsonValue {
+        let mut obj = serde_json::Map::new();
+        obj.insert("max_attempts".to_string(), serde_json::json!(max_attempts));
+
+        if let Some(ref headers) = options.headers {
+            obj.insert("headers".to_string(), serde_json::json!(headers));
+        }
+
+        if let Some(ref strategy) = options.retry_strategy {
+            obj.insert(
+                "retry_strategy".to_string(),
+                serde_json::to_value(strategy).unwrap(),
+            );
+        }
+
+        if let Some(ref cancellation) = options.cancellation {
+            let mut c = serde_json::Map::new();
+            if let Some(max_delay) = cancellation.max_delay {
+                c.insert("max_delay".to_string(), serde_json::json!(max_delay));
+            }
+            if let Some(max_duration) = cancellation.max_duration {
+                c.insert("max_duration".to_string(), serde_json::json!(max_duration));
+            }
+            if !c.is_empty() {
+                obj.insert("cancellation".to_string(), serde_json::Value::Object(c));
+            }
+        }
+
+        serde_json::Value::Object(obj)
+    }
+
+    /// Create a queue (defaults to this client's queue name)
+    pub async fn create_queue(&self, queue_name: Option<&str>) -> anyhow::Result<()> {
+        let queue = queue_name.unwrap_or(&self.queue_name);
+        let query = "SELECT durable.create_queue($1)";
+        sqlx::query(query).bind(queue).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Drop a queue and all its data
+    pub async fn drop_queue(&self, queue_name: Option<&str>) -> anyhow::Result<()> {
+        let queue = queue_name.unwrap_or(&self.queue_name);
+        let query = "SELECT durable.drop_queue($1)";
+        sqlx::query(query).bind(queue).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// List all queues
+    pub async fn list_queues(&self) -> anyhow::Result<Vec<String>> {
+        let query = "SELECT queue_name FROM durable.list_queues()";
+        let rows: Vec<(String,)> = sqlx::query_as(query).fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|(name,)| name).collect())
+    }
+
+    /// Emit an event to a queue (defaults to this client's queue)
+    pub async fn emit_event<T: Serialize>(
+        &self,
+        event_name: &str,
+        payload: &T,
+        queue_name: Option<&str>,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(!event_name.is_empty(), "event_name must be non-empty");
+
+        let queue = queue_name.unwrap_or(&self.queue_name);
+        let payload_json = serde_json::to_value(payload)?;
+
+        let query = "SELECT durable.emit_event($1, $2, $3)";
+        sqlx::query(query)
+            .bind(queue)
+            .bind(event_name)
+            .bind(&payload_json)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Cancel a task by ID. Running tasks will be cancelled at
+    /// their next checkpoint or heartbeat.
+    pub async fn cancel_task(&self, task_id: Uuid, queue_name: Option<&str>) -> anyhow::Result<()> {
+        let queue = queue_name.unwrap_or(&self.queue_name);
+        let query = "SELECT durable.cancel_task($1, $2)";
+        sqlx::query(query)
+            .bind(queue)
+            .bind(task_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Start a worker that processes tasks from the queue
+    pub async fn start_worker(&self, options: WorkerOptions) -> Worker {
+        Worker::start(
+            self.pool.clone(),
+            self.queue_name.clone(),
+            self.registry.clone(),
+            options,
+        )
+        .await
+    }
+
+    /// Close the client. Closes the pool if owned.
+    pub async fn close(self) -> anyhow::Result<()> {
+        if self.owns_pool {
+            self.pool.close().await;
+        }
+        Ok(())
+    }
+}

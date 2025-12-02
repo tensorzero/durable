@@ -1,0 +1,210 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use std::collections::HashMap;
+use uuid::Uuid;
+
+// Default value functions for RetryStrategy
+fn default_base_seconds() -> u64 {
+    5
+}
+fn default_factor() -> f64 {
+    2.0
+}
+fn default_max_seconds() -> u64 {
+    300
+}
+
+/// Retry strategy for failed tasks
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RetryStrategy {
+    /// No retries - task fails permanently on first error
+    None,
+
+    /// Fixed delay between retries
+    Fixed {
+        /// Delay in seconds between retry attempts (default: 5)
+        #[serde(default = "default_base_seconds")]
+        base_seconds: u64,
+    },
+
+    /// Exponential backoff: delay = base_seconds * (factor ^ (attempt - 1))
+    Exponential {
+        /// Initial delay in seconds (default: 5)
+        #[serde(default = "default_base_seconds")]
+        base_seconds: u64,
+        /// Multiplier for each subsequent attempt (default: 2.0)
+        #[serde(default = "default_factor")]
+        factor: f64,
+        /// Maximum delay cap in seconds (default: 300)
+        #[serde(default = "default_max_seconds")]
+        max_seconds: u64,
+    },
+}
+
+impl Default for RetryStrategy {
+    fn default() -> Self {
+        Self::Fixed {
+            base_seconds: default_base_seconds(),
+        }
+    }
+}
+
+/// Cancellation policy for tasks
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CancellationPolicy {
+    /// Cancel if task has been pending for more than this many seconds.
+    /// Checked when the task would be claimed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_delay: Option<u64>,
+
+    /// Cancel if task has been running for more than this many seconds total
+    /// (across all attempts). Checked on retry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_duration: Option<u64>,
+}
+
+/// Options for spawning a task
+#[derive(Debug, Clone, Default)]
+pub struct SpawnOptions {
+    /// Maximum number of attempts before permanent failure (default: 5)
+    pub max_attempts: Option<u32>,
+
+    /// Retry strategy (default: Fixed with 5s delay)
+    pub retry_strategy: Option<RetryStrategy>,
+
+    /// Custom headers stored with the task (arbitrary metadata)
+    pub headers: Option<HashMap<String, JsonValue>>,
+
+    /// Override the queue name
+    pub queue: Option<String>,
+
+    /// Cancellation policy
+    pub cancellation: Option<CancellationPolicy>,
+}
+
+/// Options for configuring a worker
+#[derive(Debug, Clone)]
+pub struct WorkerOptions {
+    /// Unique worker identifier (default: hostname:pid)
+    pub worker_id: Option<String>,
+
+    /// Task lease duration in seconds (default: 120).
+    /// Tasks must complete or checkpoint within this time.
+    pub claim_timeout: u64,
+
+    /// Maximum tasks to claim per poll (default: same as concurrency)
+    pub batch_size: Option<usize>,
+
+    /// Maximum parallel task executions (default: 1)
+    pub concurrency: usize,
+
+    /// Seconds between polls when queue is empty (default: 0.25)
+    pub poll_interval: f64,
+
+    /// Terminate process if task exceeds 2x claim_timeout (default: true).
+    /// This is a safety measure to prevent zombie workers.
+    pub fatal_on_lease_timeout: bool,
+}
+
+impl Default for WorkerOptions {
+    fn default() -> Self {
+        Self {
+            worker_id: None,
+            claim_timeout: 120,
+            batch_size: None,
+            concurrency: 1,
+            poll_interval: 0.25,
+            fatal_on_lease_timeout: true,
+        }
+    }
+}
+
+/// A task that has been claimed by a worker
+#[derive(Debug, Clone)]
+pub struct ClaimedTask {
+    pub run_id: Uuid,
+    pub task_id: Uuid,
+    pub task_name: String,
+    pub attempt: i32,
+    pub params: JsonValue,
+    pub retry_strategy: Option<RetryStrategy>,
+    pub max_attempts: Option<i32>,
+    pub headers: Option<HashMap<String, JsonValue>>,
+    /// Event name that woke this task (if resuming from await_event)
+    pub wake_event: Option<String>,
+    /// Event payload (if resuming from await_event, None if timed out)
+    pub event_payload: Option<JsonValue>,
+}
+
+/// Result returned when spawning a task
+#[derive(Debug, Clone)]
+pub struct SpawnResult {
+    /// Unique identifier for this task
+    pub task_id: Uuid,
+    /// Identifier for the current run (attempt)
+    pub run_id: Uuid,
+    /// Current attempt number (starts at 1)
+    pub attempt: i32,
+}
+
+/// Internal: Row returned from get_task_checkpoint_states
+#[derive(Debug, Clone, sqlx::FromRow)]
+#[allow(dead_code)]
+pub struct CheckpointRow {
+    pub checkpoint_name: String,
+    pub state: JsonValue,
+    pub status: String,
+    pub owner_run_id: Uuid,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Internal: Row returned from claim_task
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ClaimedTaskRow {
+    pub run_id: Uuid,
+    pub task_id: Uuid,
+    pub attempt: i32,
+    pub task_name: String,
+    pub params: JsonValue,
+    pub retry_strategy: Option<JsonValue>,
+    pub max_attempts: Option<i32>,
+    pub headers: Option<JsonValue>,
+    pub wake_event: Option<String>,
+    pub event_payload: Option<JsonValue>,
+}
+
+impl From<ClaimedTaskRow> for ClaimedTask {
+    fn from(row: ClaimedTaskRow) -> Self {
+        Self {
+            run_id: row.run_id,
+            task_id: row.task_id,
+            attempt: row.attempt,
+            task_name: row.task_name,
+            params: row.params,
+            retry_strategy: row
+                .retry_strategy
+                .and_then(|v| serde_json::from_value(v).ok()),
+            max_attempts: row.max_attempts,
+            headers: row.headers.and_then(|v| serde_json::from_value(v).ok()),
+            wake_event: row.wake_event,
+            event_payload: row.event_payload,
+        }
+    }
+}
+
+/// Internal: Row returned from spawn_task
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct SpawnResultRow {
+    pub task_id: Uuid,
+    pub run_id: Uuid,
+    pub attempt: i32,
+}
+
+/// Internal: Row returned from await_event
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AwaitEventResult {
+    pub should_suspend: bool,
+    pub payload: Option<JsonValue>,
+}
