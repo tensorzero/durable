@@ -153,7 +153,7 @@ impl Worker {
         let rows: Vec<ClaimedTaskRow> = sqlx::query_as(query)
             .bind(queue_name)
             .bind(worker_id)
-            .bind(claim_timeout as i64)
+            .bind(claim_timeout as i32)
             .bind(count as i32)
             .fetch_all(pool)
             .await?;

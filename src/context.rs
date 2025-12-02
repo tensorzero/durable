@@ -129,7 +129,7 @@ impl TaskContext {
             .bind(name)
             .bind(&state_json)
             .bind(self.run_id)
-            .bind(self.claim_timeout as i64)
+            .bind(self.claim_timeout as i32)
             .execute(&self.pool)
             .await?;
 
@@ -221,7 +221,7 @@ impl TaskContext {
         }
 
         // Call await_event stored procedure
-        let timeout_secs = timeout.map(|d| d.as_secs() as i64);
+        let timeout_secs = timeout.map(|d| d.as_secs() as i32);
 
         let query = "SELECT should_suspend, payload
              FROM durable.await_event($1, $2, $3, $4, $5, $6)";
@@ -283,8 +283,8 @@ impl TaskContext {
     /// Returns `TaskError::Control(Cancelled)` if the task was cancelled.
     pub async fn heartbeat(&self, duration: Option<std::time::Duration>) -> TaskResult<()> {
         let extend_by = duration
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(self.claim_timeout as i64);
+            .map(|d| d.as_secs() as i32)
+            .unwrap_or(self.claim_timeout as i32);
 
         let query = "SELECT durable.extend_claim($1, $2, $3)";
         sqlx::query(query)
