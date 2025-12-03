@@ -1,30 +1,54 @@
 use serde_json::Value as JsonValue;
 use thiserror::Error;
 
-/// Signals that interrupt task execution (these are not errors!)
+/// Signals that interrupt task execution without indicating failure.
+///
+/// These are not errors - they represent intentional control flow that the worker
+/// handles specially. When a task returns `Err(TaskError::Control(_))`, the worker
+/// will not mark it as failed or trigger retries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlFlow {
-    /// Task should suspend and resume later (sleep, await_event)
+    /// Task should suspend and resume later.
+    ///
+    /// Returned by [`TaskContext::sleep_for`](crate::TaskContext::sleep_for),
+    /// [`TaskContext::sleep_until`](crate::TaskContext::sleep_until),
+    /// and [`TaskContext::await_event`](crate::TaskContext::await_event)
+    /// when the task needs to wait.
     Suspend,
-    /// Task was cancelled (detected via AB001 error from database)
+    /// Task was cancelled.
+    ///
+    /// Detected when database operations return error code AB001, indicating
+    /// the task was cancelled via [`Durable::cancel_task`](crate::Durable::cancel_task).
     Cancelled,
 }
 
-/// Error type for task execution
+/// Error type for task execution.
+///
+/// This enum distinguishes between control flow signals (suspension, cancellation)
+/// and actual failures. The worker handles these differently:
+///
+/// - `Control(Suspend)` - Task is waiting; worker does nothing (scheduler will resume it)
+/// - `Control(Cancelled)` - Task was cancelled; worker does nothing
+/// - `Failed(_)` - Actual error; worker records failure and may retry
 #[derive(Debug, Error)]
 pub enum TaskError {
     /// Control flow signal - not an actual error.
-    /// Worker will not mark the task as failed.
+    ///
+    /// The worker will not mark the task as failed or trigger retries.
     #[error("control flow: {0:?}")]
     Control(ControlFlow),
 
-    /// Any other error during task execution.
-    /// Worker will call fail_run and potentially retry.
+    /// An error occurred during task execution.
+    ///
+    /// The worker will record this failure and may retry the task based on
+    /// the configured [`RetryStrategy`](crate::RetryStrategy).
     #[error(transparent)]
     Failed(#[from] anyhow::Error),
 }
 
-/// Convenience type alias for task return types
+/// Result type alias for task execution.
+///
+/// Use this as the return type for [`Task::run`](crate::Task::run) implementations.
 pub type TaskResult<T> = Result<T, TaskError>;
 
 impl From<serde_json::Error> for TaskError {

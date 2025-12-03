@@ -11,6 +11,27 @@ use crate::types::{SpawnOptions, SpawnResult, SpawnResultRow, WorkerOptions};
 use crate::worker::Worker;
 
 /// The main client for interacting with durable workflows.
+///
+/// Use this client to:
+/// - Register task types with [`register`](Self::register)
+/// - Spawn tasks with [`spawn`](Self::spawn) or [`spawn_with_options`](Self::spawn_with_options)
+/// - Start workers with [`start_worker`](Self::start_worker)
+/// - Manage queues with [`create_queue`](Self::create_queue), [`drop_queue`](Self::drop_queue)
+/// - Emit events with [`emit_event`](Self::emit_event)
+/// - Cancel tasks with [`cancel_task`](Self::cancel_task)
+///
+/// # Example
+///
+/// ```ignore
+/// let client = Durable::builder()
+///     .database_url("postgres://localhost/myapp")
+///     .queue_name("tasks")
+///     .build()
+///     .await?;
+///
+/// client.register::<MyTask>().await;
+/// client.spawn::<MyTask>(params).await?;
+/// ```
 pub struct Durable {
     pool: PgPool,
     owns_pool: bool,
@@ -19,7 +40,18 @@ pub struct Durable {
     registry: Arc<RwLock<TaskRegistry>>,
 }
 
-/// Builder for configuring a Durable client.
+/// Builder for configuring a [`Durable`] client.
+///
+/// # Example
+///
+/// ```ignore
+/// let client = Durable::builder()
+///     .database_url("postgres://localhost/myapp")
+///     .queue_name("orders")
+///     .default_max_attempts(3)
+///     .build()
+///     .await?;
+/// ```
 pub struct DurableBuilder {
     database_url: Option<String>,
     pool: Option<PgPool>,

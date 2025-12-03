@@ -11,7 +11,26 @@ use crate::error::{ControlFlow, TaskError, serialize_error};
 use crate::task::TaskRegistry;
 use crate::types::{ClaimedTask, ClaimedTaskRow, WorkerOptions};
 
-/// A worker that processes tasks from a queue.
+/// A background worker that processes tasks from a queue.
+///
+/// Workers are created via [`Durable::start_worker`](crate::Durable::start_worker) and run in the background,
+/// polling for tasks and executing them. Multiple workers can process the same
+/// queue concurrently for horizontal scaling.
+///
+/// # Example
+///
+/// ```ignore
+/// let worker = client.start_worker(WorkerOptions {
+///     concurrency: 4,
+///     ..Default::default()
+/// }).await;
+///
+/// // Worker runs in background...
+/// tokio::signal::ctrl_c().await?;
+///
+/// // Graceful shutdown waits for in-flight tasks
+/// worker.shutdown().await;
+/// ```
 pub struct Worker {
     shutdown_tx: broadcast::Sender<()>,
     handle: tokio::task::JoinHandle<()>,
@@ -52,8 +71,10 @@ impl Worker {
         }
     }
 
-    /// Gracefully shutdown the worker.
-    /// Waits for all in-flight tasks to complete.
+    /// Gracefully shut down the worker.
+    ///
+    /// Signals the worker to stop accepting new tasks and waits for all
+    /// in-flight tasks to complete before returning.
     pub async fn shutdown(self) {
         let _ = self.shutdown_tx.send(());
         let _ = self.handle.await;

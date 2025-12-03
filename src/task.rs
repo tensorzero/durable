@@ -47,7 +47,11 @@ pub trait Task: Send + Sync + 'static {
     /// Execute the task logic.
     ///
     /// Return `Ok(output)` on success, or `Err(TaskError)` on failure.
-    /// Use `?` freely - errors will be caught and the task will be retried.
+    /// Use `?` freely - errors will propagate and the task will be retried
+    /// according to its [`RetryStrategy`](crate::RetryStrategy).
+    ///
+    /// The [`TaskContext`] provides methods for checkpointing, sleeping,
+    /// and waiting for events. See [`TaskContext`] for details.
     async fn run(params: Self::Params, ctx: TaskContext) -> TaskResult<Self::Output>;
 }
 

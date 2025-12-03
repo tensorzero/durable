@@ -9,10 +9,31 @@ use crate::error::{ControlFlow, TaskError, TaskResult};
 use crate::types::{AwaitEventResult, CheckpointRow, ClaimedTask};
 
 /// Context provided to task execution, enabling checkpointing and suspension.
+///
+/// The `TaskContext` is the primary interface for interacting with the durable
+/// execution system from within a task. It provides:
+///
+/// - **Checkpointing** via [`step`](Self::step) - Execute operations that are cached
+///   and not re-executed on retry
+/// - **Sleeping** via [`sleep_for`](Self::sleep_for) and [`sleep_until`](Self::sleep_until) -
+///   Suspend the task for a duration or until a specific time
+/// - **Events** via [`await_event`](Self::await_event) and [`emit_event`](Self::emit_event) -
+///   Wait for or emit events to coordinate between tasks
+/// - **Lease management** via [`heartbeat`](Self::heartbeat) - Extend the task lease
+///   for long-running operations
+///
+/// # Public Fields
+///
+/// - `task_id` - Unique identifier for this task (use as idempotency key)
+/// - `run_id` - Identifier for the current execution attempt
+/// - `attempt` - Current attempt number (starts at 1)
 pub struct TaskContext {
-    // Public fields - accessible to task code
+    /// Unique identifier for this task. Use this as an idempotency key for
+    /// external API calls to achieve "exactly-once" semantics.
     pub task_id: Uuid,
+    /// Identifier for the current run (attempt).
     pub run_id: Uuid,
+    /// Current attempt number (starts at 1).
     pub attempt: i32,
 
     // Internal state
@@ -75,13 +96,24 @@ impl TaskContext {
     /// "exactly-once" semantics for side effects within the step.
     ///
     /// # Arguments
+    ///
     /// * `name` - Unique name for this step. If called multiple times with
     ///   the same name, auto-increments: "name", "name#2", "name#3"
     /// * `f` - Async closure to execute. Must return a JSON-serializable result.
     ///
     /// # Errors
+    ///
     /// * `TaskError::Control(Cancelled)` - Task was cancelled
     /// * `TaskError::Failed` - Step execution or serialization failed
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let payment_id = ctx.step("charge-payment", || async {
+    ///     let idempotency_key = format!("{}:charge", ctx.task_id);
+    ///     stripe::charge(amount, &idempotency_key).await
+    /// }).await?;
+    /// ```
     pub async fn step<T, F, Fut>(&mut self, name: &str, f: F) -> TaskResult<T>
     where
         T: Serialize + DeserializeOwned + Send,
@@ -190,6 +222,7 @@ impl TaskContext {
     /// Wait for an event by name. Returns the event payload when it arrives.
     ///
     /// # Behavior
+    ///
     /// - If the event has already been emitted, returns immediately with payload
     /// - Otherwise, suspends the task until the event arrives
     /// - Events are cached like checkpoints - receiving the same event twice
@@ -197,8 +230,19 @@ impl TaskContext {
     /// - If timeout is specified and exceeded, returns a timeout error
     ///
     /// # Arguments
+    ///
     /// * `event_name` - The event to wait for (e.g., "shipment.packed:ORDER-123")
     /// * `timeout` - Optional timeout duration
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Wait for a shipment event with 7-day timeout
+    /// let shipment: ShipmentEvent = ctx.await_event(
+    ///     &format!("packed:{}", order_id),
+    ///     Some(Duration::from_secs(7 * 24 * 3600)),
+    /// ).await?;
+    /// ```
     pub async fn await_event<T: DeserializeOwned>(
         &mut self,
         event_name: &str,

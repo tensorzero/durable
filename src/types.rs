@@ -15,7 +15,25 @@ fn default_max_seconds() -> u64 {
     300
 }
 
-/// Retry strategy for failed tasks
+/// Retry strategy for failed tasks.
+///
+/// Controls how long to wait between retry attempts when a task fails.
+/// The default strategy is [`RetryStrategy::Fixed`] with a 5-second delay.
+///
+/// # Example
+///
+/// ```
+/// use durable::{RetryStrategy, SpawnOptions};
+///
+/// let options = SpawnOptions {
+///     retry_strategy: Some(RetryStrategy::Exponential {
+///         base_seconds: 1,
+///         factor: 2.0,
+///         max_seconds: 60,
+///     }),
+///     ..Default::default()
+/// };
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RetryStrategy {
@@ -51,7 +69,10 @@ impl Default for RetryStrategy {
     }
 }
 
-/// Cancellation policy for tasks
+/// Automatic cancellation policy for tasks.
+///
+/// Allows tasks to be automatically cancelled based on how long they've been
+/// waiting or running. Useful for preventing stale tasks from consuming resources.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CancellationPolicy {
     /// Cancel if task has been pending for more than this many seconds.
@@ -65,7 +86,25 @@ pub struct CancellationPolicy {
     pub max_duration: Option<u64>,
 }
 
-/// Options for spawning a task
+/// Options for spawning a task.
+///
+/// All fields are optional and will use defaults if not specified.
+///
+/// # Example
+///
+/// ```
+/// use durable::{SpawnOptions, RetryStrategy};
+///
+/// let options = SpawnOptions {
+///     max_attempts: Some(3),
+///     retry_strategy: Some(RetryStrategy::Exponential {
+///         base_seconds: 5,
+///         factor: 2.0,
+///         max_seconds: 300,
+///     }),
+///     ..Default::default()
+/// };
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct SpawnOptions {
     /// Maximum number of attempts before permanent failure (default: 5)
@@ -84,7 +123,20 @@ pub struct SpawnOptions {
     pub cancellation: Option<CancellationPolicy>,
 }
 
-/// Options for configuring a worker
+/// Options for configuring a worker.
+///
+/// # Example
+///
+/// ```
+/// use durable::WorkerOptions;
+///
+/// let options = WorkerOptions {
+///     concurrency: 4,
+///     claim_timeout: 120,
+///     poll_interval: 0.5,
+///     ..Default::default()
+/// };
+/// ```
 #[derive(Debug, Clone)]
 pub struct WorkerOptions {
     /// Unique worker identifier (default: hostname:pid)
