@@ -14,6 +14,18 @@ A Rust SDK for building durable, fault-tolerant workflows using PostgreSQL.
 
 Unlike exception-based durable execution systems (Python, TypeScript), this SDK uses Rust's `Result` type for suspension control flow, making it idiomatic and type-safe.
 
+## Why Durable Execution?
+
+Traditional background job systems execute tasks once and hope for the best. Durable execution is different - it provides **guaranteed progress** even when things go wrong:
+
+- **Crash recovery** - If your process dies mid-workflow, tasks resume exactly where they left off. No lost progress, no duplicate work.
+- **Long-running workflows** - Execute workflows that span hours or days. Sleep for a week waiting for a subscription to renew, then continue.
+- **External event coordination** - Wait for webhooks, human approvals, or other services. The task suspends until the event arrives.
+- **Reliable retries** - Transient failures (network issues, rate limits) are automatically retried with configurable backoff.
+- **Exactly-once semantics** - Checkpointed steps don't re-execute on retry. Combined with idempotency keys, achieve exactly-once side effects.
+
+Use durable execution when your workflow is too important to fail silently, too long to hold in memory, or too complex for simple retries.
+
 ## Installation
 
 Add to your `Cargo.toml`:
@@ -31,35 +43,49 @@ use serde::{Deserialize, Serialize};
 
 // Define your task parameters and output
 #[derive(Serialize, Deserialize)]
-struct SendEmailParams {
-    to: String,
-    subject: String,
-    body: String,
+struct ResearchParams {
+    query: String,
 }
 
 #[derive(Serialize, Deserialize)]
-struct SendEmailResult {
-    message_id: String,
+struct ResearchResult {
+    summary: String,
+    sources: Vec<String>,
 }
 
 // Implement the Task trait
-struct SendEmailTask;
+struct ResearchTask;
 
 #[async_trait]
-impl Task for SendEmailTask {
-    const NAME: &'static str = "send-email";
-    type Params = SendEmailParams;
-    type Output = SendEmailResult;
+impl Task for ResearchTask {
+    const NAME: &'static str = "research";
+    type Params = ResearchParams;
+    type Output = ResearchResult;
 
     async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
-        // This step is checkpointed - if the task crashes after sending,
-        // it won't send again on retry
-        let message_id = ctx.step("send", || async {
-            // Your email sending logic here
-            Ok("msg-123".to_string())
+        // Phase 1: Find relevant sources (checkpointed)
+        // If the task crashes after this step, it won't re-run on retry
+        let sources: Vec<String> = ctx.step("find-sources", || async {
+            // Search logic here...
+            Ok(vec![
+                "https://example.com/article1".into(),
+                "https://example.com/article2".into(),
+            ])
         }).await?;
 
-        Ok(SendEmailResult { message_id })
+        // Phase 2: Analyze the sources (checkpointed)
+        let analysis: String = ctx.step("analyze", || async {
+            // Analysis logic here...
+            Ok("Key findings from sources...".into())
+        }).await?;
+
+        // Phase 3: Generate summary (checkpointed)
+        let summary: String = ctx.step("summarize", || async {
+            // Summarization logic here...
+            Ok(format!("Research summary for '{}': {}", params.query, analysis))
+        }).await?;
+
+        Ok(ResearchResult { summary, sources })
     }
 }
 
@@ -68,18 +94,16 @@ async fn main() -> anyhow::Result<()> {
     // Create the client
     let client = Durable::builder()
         .database_url("postgres://localhost/myapp")
-        .queue_name("emails")
+        .queue_name("research")
         .build()
         .await?;
 
     // Register your task
-    client.register::<SendEmailTask>().await;
+    client.register::<ResearchTask>().await;
 
     // Spawn a task
-    let result = client.spawn::<SendEmailTask>(SendEmailParams {
-        to: "user@example.com".into(),
-        subject: "Hello".into(),
-        body: "World".into(),
+    let result = client.spawn::<ResearchTask>(ResearchParams {
+        query: "distributed systems consensus algorithms".into(),
     }).await?;
 
     println!("Spawned task: {}", result.task_id);
@@ -153,6 +177,39 @@ client.emit_event(
     &ShipmentEvent { tracking: "1Z999".into() },
     None,
 ).await?;
+```
+
+### Task Composition
+
+Tasks are independent execution units. The SDK currently does not support spawning child tasks from within a task or waiting for other tasks to complete (no built-in join/select semantics).
+
+**For task coordination, use event-based patterns:**
+
+```rust
+// Task A: Waits for a signal from Task B
+let approval: ApprovalPayload = ctx.await_event(
+    &format!("approved:{}", request_id),
+    Some(Duration::from_secs(24 * 3600)), // 24 hour timeout
+).await?;
+
+// Task B (or external service): Sends the signal
+client.emit_event(
+    &format!("approved:{}", request_id),
+    &ApprovalPayload { approved_by: "admin".into() },
+    None,
+).await?;
+```
+
+**For fan-out patterns, spawn tasks externally:**
+
+```rust
+// Orchestrator code (outside of any task)
+let mut task_ids = vec![];
+for item in items {
+    let result = client.spawn::<ProcessItemTask>(item).await?;
+    task_ids.push(result.task_id);
+}
+// Coordinate completion via events or poll task status
 ```
 
 ## API Overview
