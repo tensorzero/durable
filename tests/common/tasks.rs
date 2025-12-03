@@ -2,6 +2,61 @@ use durable::{Task, TaskContext, TaskError, TaskResult, async_trait};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
+// ResearchTask - Example from README demonstrating multi-step checkpointing
+// ============================================================================
+
+pub struct ResearchTask;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchParams {
+    pub query: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchResult {
+    pub summary: String,
+    pub sources: Vec<String>,
+}
+
+#[async_trait]
+impl Task for ResearchTask {
+    const NAME: &'static str = "research";
+    type Params = ResearchParams;
+    type Output = ResearchResult;
+
+    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        // Phase 1: Find relevant sources (checkpointed)
+        let sources: Vec<String> = ctx
+            .step("find-sources", || async {
+                Ok(vec![
+                    "https://example.com/article1".into(),
+                    "https://example.com/article2".into(),
+                ])
+            })
+            .await?;
+
+        // Phase 2: Analyze the sources (checkpointed)
+        let analysis: String = ctx
+            .step("analyze", || async {
+                Ok("Key findings from sources...".into())
+            })
+            .await?;
+
+        // Phase 3: Generate summary (checkpointed)
+        let summary: String = ctx
+            .step("summarize", || async {
+                Ok(format!(
+                    "Research summary for '{}': {}",
+                    params.query, analysis
+                ))
+            })
+            .await?;
+
+        Ok(ResearchResult { summary, sources })
+    }
+}
+
+// ============================================================================
 // EchoTask - Simple task that returns input
 // ============================================================================
 

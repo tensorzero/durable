@@ -1,6 +1,9 @@
 mod common;
 
-use common::tasks::{EchoParams, EchoTask, EmptyParamsTask, MultiStepOutput, MultiStepTask};
+use common::tasks::{
+    EchoParams, EchoTask, EmptyParamsTask, MultiStepOutput, MultiStepTask, ResearchParams,
+    ResearchResult, ResearchTask,
+};
 use durable::{Durable, MIGRATOR, WorkerOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use std::time::Duration;
@@ -410,6 +413,56 @@ async fn test_task_result_stored_correctly(pool: PgPool) -> sqlx::Result<()> {
         .await
         .expect("Task should have a result");
     assert_eq!(result, serde_json::json!(test_message));
+
+    Ok(())
+}
+
+// ============================================================================
+// README Example Test
+// ============================================================================
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_research_task_readme_example(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "exec_research").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<ResearchTask>().await;
+
+    let spawn_result = client
+        .spawn::<ResearchTask>(ResearchParams {
+            query: "distributed systems consensus algorithms".into(),
+        })
+        .await
+        .expect("Failed to spawn task");
+
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            ..Default::default()
+        })
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    worker.shutdown().await;
+
+    // Verify task completed
+    let state = get_task_state(&pool, "exec_research", spawn_result.task_id).await;
+    assert_eq!(state, "completed");
+
+    // Verify result structure
+    let result = get_task_result(&pool, "exec_research", spawn_result.task_id)
+        .await
+        .expect("Task should have a result");
+
+    let output: ResearchResult =
+        serde_json::from_value(result).expect("Failed to deserialize result");
+
+    assert_eq!(output.sources.len(), 2);
+    assert!(
+        output
+            .summary
+            .contains("distributed systems consensus algorithms")
+    );
 
     Ok(())
 }
