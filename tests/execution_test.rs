@@ -25,7 +25,6 @@ struct TaskState {
 
 /// Helper to query task state from the database.
 async fn get_task_state(pool: &PgPool, queue_name: &str, task_id: uuid::Uuid) -> String {
-    // TODO: Fix dynamic query for sqlx 0.9
     let query = AssertSqlSafe(format!(
         "SELECT state FROM durable.t_{queue_name} WHERE task_id = $1"
     ));
@@ -48,7 +47,6 @@ async fn get_task_result(
     queue_name: &str,
     task_id: uuid::Uuid,
 ) -> Option<serde_json::Value> {
-    // TODO: Fix dynamic query for sqlx 0.9
     let query = AssertSqlSafe(format!(
         "SELECT completed_payload FROM durable.t_{queue_name} WHERE task_id = $1"
     ));

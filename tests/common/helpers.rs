@@ -5,7 +5,6 @@ use sqlx::{AssertSqlSafe, PgPool};
 /// Uses the durable.fake_now session variable.
 #[allow(dead_code)]
 pub async fn set_fake_time(pool: &PgPool, time: DateTime<Utc>) -> sqlx::Result<()> {
-    // TODO: Fix dynamic query for sqlx 0.9
     let query = AssertSqlSafe(format!("SET durable.fake_now = '{}'", time.to_rfc3339()));
     sqlx::query(query).execute(pool).await?;
     Ok(())
