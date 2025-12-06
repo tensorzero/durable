@@ -51,6 +51,16 @@ pub struct TaskContext {
     step_counters: HashMap<String, u32>,
 }
 
+/// Validate that a user-provided step name doesn't use reserved prefix.
+fn validate_user_name(name: &str) -> TaskResult<()> {
+    if name.starts_with('$') {
+        return Err(TaskError::Failed(anyhow::anyhow!(
+            "Step names cannot start with '$' (reserved for internal use)"
+        )));
+    }
+    Ok(())
+}
+
 impl TaskContext {
     /// Create a new TaskContext. Called by the worker before executing a task.
     /// Loads all existing checkpoints into the cache.
@@ -120,6 +130,7 @@ impl TaskContext {
         F: FnOnce() -> Fut + Send,
         Fut: std::future::Future<Output = anyhow::Result<T>> + Send,
     {
+        validate_user_name(name)?;
         let checkpoint_name = self.get_checkpoint_name(name);
 
         // Return cached value if step was already completed
@@ -175,6 +186,7 @@ impl TaskContext {
     /// This is checkpointed - if the task is retried, the original wake
     /// time is preserved (won't extend the sleep on retry).
     pub async fn sleep_for(&mut self, name: &str, duration: std::time::Duration) -> TaskResult<()> {
+        validate_user_name(name)?;
         let wake_at = Utc::now()
             + chrono::Duration::from_std(duration)
                 .map_err(|e| TaskError::Failed(anyhow::anyhow!("Invalid duration: {e}")))?;
@@ -187,6 +199,7 @@ impl TaskContext {
     /// the task actually resumes. If the time has already passed when
     /// this is called (e.g., on retry), returns immediately.
     pub async fn sleep_until(&mut self, name: &str, wake_at: DateTime<Utc>) -> TaskResult<()> {
+        validate_user_name(name)?;
         let checkpoint_name = self.get_checkpoint_name(name);
 
         // Check if we have a stored wake time from a previous run
@@ -248,6 +261,7 @@ impl TaskContext {
         event_name: &str,
         timeout: Option<std::time::Duration>,
     ) -> TaskResult<T> {
+        validate_user_name(event_name)?;
         let step_name = format!("$awaitEvent:{event_name}");
         let checkpoint_name = self.get_checkpoint_name(&step_name);
 
@@ -339,5 +353,51 @@ impl TaskContext {
             .await?;
 
         Ok(())
+    }
+
+    /// Generate a durable random value in [0, 1).
+    ///
+    /// The value is checkpointed - retries will return the same value.
+    /// Each call generates a new checkpoint with auto-incremented name.
+    pub async fn rand(&mut self) -> TaskResult<f64> {
+        let checkpoint_name = self.get_checkpoint_name("$rand");
+        if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
+            return Ok(serde_json::from_value(cached.clone())?);
+        }
+        let value: f64 = rand::random();
+        self.persist_checkpoint(&checkpoint_name, &value).await?;
+        Ok(value)
+    }
+
+    /// Get the current time as a durable checkpoint.
+    ///
+    /// The timestamp is checkpointed - retries will return the same timestamp.
+    /// Each call generates a new checkpoint with auto-incremented name.
+    pub async fn now(&mut self) -> TaskResult<DateTime<Utc>> {
+        let checkpoint_name = self.get_checkpoint_name("$now");
+        if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
+            let stored: String = serde_json::from_value(cached.clone())?;
+            return Ok(DateTime::parse_from_rfc3339(&stored)
+                .map_err(|e| TaskError::Failed(anyhow::anyhow!("Invalid stored time: {e}")))?
+                .with_timezone(&Utc));
+        }
+        let value = Utc::now();
+        self.persist_checkpoint(&checkpoint_name, &value.to_rfc3339())
+            .await?;
+        Ok(value)
+    }
+
+    /// Generate a durable UUIDv7.
+    ///
+    /// The UUID is checkpointed - retries will return the same UUID.
+    /// Each call generates a new checkpoint with auto-incremented name.
+    pub async fn uuid7(&mut self) -> TaskResult<Uuid> {
+        let checkpoint_name = self.get_checkpoint_name("$uuid7");
+        if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
+            return Ok(serde_json::from_value(cached.clone())?);
+        }
+        let value = Uuid::now_v7();
+        self.persist_checkpoint(&checkpoint_name, &value).await?;
+        Ok(value)
     }
 }

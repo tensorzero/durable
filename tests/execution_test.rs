@@ -1,8 +1,9 @@
 mod common;
 
 use common::tasks::{
-    EchoParams, EchoTask, EmptyParamsTask, MultiStepOutput, MultiStepTask, ResearchParams,
-    ResearchResult, ResearchTask,
+    ConvenienceMethodsOutput, ConvenienceMethodsTask, EchoParams, EchoTask, EmptyParamsTask,
+    MultiStepOutput, MultiStepTask, MultipleCallsOutput, MultipleConvenienceCallsTask,
+    ResearchParams, ResearchResult, ResearchTask, ReservedPrefixTask,
 };
 use durable::{Durable, MIGRATOR, WorkerOptions};
 use sqlx::{AssertSqlSafe, PgPool};
@@ -461,6 +462,130 @@ async fn test_research_task_readme_example(pool: PgPool) -> sqlx::Result<()> {
             .summary
             .contains("distributed systems consensus algorithms")
     );
+
+    Ok(())
+}
+
+// ============================================================================
+// Convenience Methods Tests
+// ============================================================================
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_convenience_methods_execute(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "exec_convenience").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<ConvenienceMethodsTask>().await;
+
+    let spawn_result = client
+        .spawn::<ConvenienceMethodsTask>(())
+        .await
+        .expect("Failed to spawn task");
+
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            ..Default::default()
+        })
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    worker.shutdown().await;
+
+    // Verify task completed
+    let state = get_task_state(&pool, "exec_convenience", spawn_result.task_id).await;
+    assert_eq!(state, "completed");
+
+    // Verify result structure
+    let result = get_task_result(&pool, "exec_convenience", spawn_result.task_id)
+        .await
+        .expect("Task should have a result");
+
+    let output: ConvenienceMethodsOutput =
+        serde_json::from_value(result).expect("Failed to deserialize result");
+
+    // rand should be in [0, 1)
+    assert!(output.rand_value >= 0.0 && output.rand_value < 1.0);
+
+    // now should be a valid RFC3339 timestamp
+    assert!(!output.now_value.is_empty());
+
+    // uuid should be valid (non-nil)
+    assert!(!output.uuid_value.is_nil());
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_multiple_convenience_calls_produce_different_values(
+    pool: PgPool,
+) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "exec_multi_convenience").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<MultipleConvenienceCallsTask>().await;
+
+    let spawn_result = client
+        .spawn::<MultipleConvenienceCallsTask>(())
+        .await
+        .expect("Failed to spawn task");
+
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            ..Default::default()
+        })
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    worker.shutdown().await;
+
+    // Verify task completed
+    let state = get_task_state(&pool, "exec_multi_convenience", spawn_result.task_id).await;
+    assert_eq!(state, "completed");
+
+    let result = get_task_result(&pool, "exec_multi_convenience", spawn_result.task_id)
+        .await
+        .expect("Task should have a result");
+
+    let output: MultipleCallsOutput =
+        serde_json::from_value(result).expect("Failed to deserialize result");
+
+    // Multiple calls should produce different values (auto-increment works)
+    // Note: there's a tiny chance rand1 == rand2, but it's astronomically unlikely
+    assert_ne!(
+        output.uuid1, output.uuid2,
+        "Multiple uuid7() calls should produce different UUIDs"
+    );
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_reserved_prefix_rejected(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "exec_reserved").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<ReservedPrefixTask>().await;
+
+    let spawn_result = client
+        .spawn::<ReservedPrefixTask>(())
+        .await
+        .expect("Failed to spawn task");
+
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            ..Default::default()
+        })
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    worker.shutdown().await;
+
+    // Task should have failed because $ prefix is reserved
+    let state = get_task_state(&pool, "exec_reserved", spawn_result.task_id).await;
+    assert_eq!(state, "failed", "Task using $ prefix should fail");
 
     Ok(())
 }
