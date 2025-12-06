@@ -289,3 +289,91 @@ impl Task for HeartbeatTask {
         Ok(params.iterations)
     }
 }
+
+// ============================================================================
+// ConvenienceMethodsTask - Task that uses rand(), now(), and uuid7()
+// ============================================================================
+
+pub struct ConvenienceMethodsTask;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConvenienceMethodsOutput {
+    pub rand_value: f64,
+    pub now_value: String,
+    pub uuid_value: uuid::Uuid,
+}
+
+#[async_trait]
+impl Task for ConvenienceMethodsTask {
+    const NAME: &'static str = "convenience-methods";
+    type Params = ();
+    type Output = ConvenienceMethodsOutput;
+
+    async fn run(_params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        let rand_value = ctx.rand().await?;
+        let now_value = ctx.now().await?;
+        let uuid_value = ctx.uuid7().await?;
+
+        Ok(ConvenienceMethodsOutput {
+            rand_value,
+            now_value: now_value.to_rfc3339(),
+            uuid_value,
+        })
+    }
+}
+
+// ============================================================================
+// MultipleConvenienceCallsTask - Tests multiple calls produce different values
+// ============================================================================
+
+pub struct MultipleConvenienceCallsTask;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultipleCallsOutput {
+    pub rand1: f64,
+    pub rand2: f64,
+    pub uuid1: uuid::Uuid,
+    pub uuid2: uuid::Uuid,
+}
+
+#[async_trait]
+impl Task for MultipleConvenienceCallsTask {
+    const NAME: &'static str = "multiple-convenience-calls";
+    type Params = ();
+    type Output = MultipleCallsOutput;
+
+    async fn run(_params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        let rand1 = ctx.rand().await?;
+        let rand2 = ctx.rand().await?;
+        let uuid1 = ctx.uuid7().await?;
+        let uuid2 = ctx.uuid7().await?;
+
+        Ok(MultipleCallsOutput {
+            rand1,
+            rand2,
+            uuid1,
+            uuid2,
+        })
+    }
+}
+
+// ============================================================================
+// ReservedPrefixTask - Tests that $ prefix is rejected
+// ============================================================================
+
+pub struct ReservedPrefixTask;
+
+#[async_trait]
+impl Task for ReservedPrefixTask {
+    const NAME: &'static str = "reserved-prefix";
+    type Params = ();
+    type Output = ();
+
+    async fn run(_params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        // This should fail because $ is reserved
+        let _: String = ctx
+            .step("$bad-name", || async { Ok("test".into()) })
+            .await?;
+        Ok(())
+    }
+}
