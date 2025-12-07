@@ -7,7 +7,44 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::task::{Task, TaskRegistry, TaskWrapper};
-use crate::types::{SpawnOptions, SpawnResult, SpawnResultRow, WorkerOptions};
+use crate::types::{
+    CancellationPolicy, RetryStrategy, SpawnOptions, SpawnResult, SpawnResultRow, WorkerOptions,
+};
+
+/// Internal struct for serializing spawn options to the database.
+#[derive(Serialize)]
+struct SpawnOptionsDb<'a> {
+    max_attempts: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    headers: Option<&'a HashMap<String, JsonValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry_strategy: Option<&'a RetryStrategy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cancellation: Option<CancellationPolicyDb>,
+}
+
+/// Internal struct for serializing cancellation policy (only non-None fields).
+#[derive(Serialize)]
+struct CancellationPolicyDb {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_delay: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_duration: Option<u64>,
+}
+
+impl CancellationPolicyDb {
+    fn from_policy(policy: &CancellationPolicy) -> Option<Self> {
+        if policy.max_delay.is_none() && policy.max_duration.is_none() {
+            None
+        } else {
+            Some(Self {
+                max_delay: policy.max_delay,
+                max_duration: policy.max_duration,
+            })
+        }
+    }
+}
+
 use crate::worker::Worker;
 
 /// The main client for interacting with durable workflows.
@@ -178,7 +215,7 @@ impl Durable {
         let queue = options.queue.as_deref().unwrap_or(&self.queue_name);
         let max_attempts = options.max_attempts.unwrap_or(self.default_max_attempts);
 
-        let db_options = self.serialize_spawn_options(&options, max_attempts);
+        let db_options = Self::serialize_spawn_options(&options, max_attempts)?;
 
         let query = "SELECT task_id, run_id, attempt
              FROM durable.spawn_task($1, $2, $3, $4)";
@@ -198,35 +235,20 @@ impl Durable {
         })
     }
 
-    fn serialize_spawn_options(&self, options: &SpawnOptions, max_attempts: u32) -> JsonValue {
-        let mut obj = serde_json::Map::new();
-        obj.insert("max_attempts".to_string(), serde_json::json!(max_attempts));
-
-        if let Some(ref headers) = options.headers {
-            obj.insert("headers".to_string(), serde_json::json!(headers));
-        }
-
-        if let Some(ref strategy) = options.retry_strategy {
-            obj.insert(
-                "retry_strategy".to_string(),
-                serde_json::to_value(strategy).unwrap(),
-            );
-        }
-
-        if let Some(ref cancellation) = options.cancellation {
-            let mut c = serde_json::Map::new();
-            if let Some(max_delay) = cancellation.max_delay {
-                c.insert("max_delay".to_string(), serde_json::json!(max_delay));
-            }
-            if let Some(max_duration) = cancellation.max_duration {
-                c.insert("max_duration".to_string(), serde_json::json!(max_duration));
-            }
-            if !c.is_empty() {
-                obj.insert("cancellation".to_string(), serde_json::Value::Object(c));
-            }
-        }
-
-        serde_json::Value::Object(obj)
+    fn serialize_spawn_options(
+        options: &SpawnOptions,
+        max_attempts: u32,
+    ) -> serde_json::Result<JsonValue> {
+        let db_options = SpawnOptionsDb {
+            max_attempts,
+            headers: options.headers.as_ref(),
+            retry_strategy: options.retry_strategy.as_ref(),
+            cancellation: options
+                .cancellation
+                .as_ref()
+                .and_then(CancellationPolicyDb::from_policy),
+        };
+        serde_json::to_value(db_options)
     }
 
     /// Create a queue (defaults to this client's queue name)

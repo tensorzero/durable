@@ -228,22 +228,22 @@ pub struct ClaimedTaskRow {
     pub event_payload: Option<JsonValue>,
 }
 
-impl From<ClaimedTaskRow> for ClaimedTask {
-    fn from(row: ClaimedTaskRow) -> Self {
-        Self {
+impl TryFrom<ClaimedTaskRow> for ClaimedTask {
+    type Error = serde_json::Error;
+
+    fn try_from(row: ClaimedTaskRow) -> Result<Self, Self::Error> {
+        Ok(Self {
             run_id: row.run_id,
             task_id: row.task_id,
             attempt: row.attempt,
             task_name: row.task_name,
             params: row.params,
-            retry_strategy: row
-                .retry_strategy
-                .and_then(|v| serde_json::from_value(v).ok()),
+            retry_strategy: row.retry_strategy.map(serde_json::from_value).transpose()?,
             max_attempts: row.max_attempts,
-            headers: row.headers.and_then(|v| serde_json::from_value(v).ok()),
+            headers: row.headers.map(serde_json::from_value).transpose()?,
             wake_event: row.wake_event,
             event_payload: row.event_payload,
-        }
+        })
     }
 }
 

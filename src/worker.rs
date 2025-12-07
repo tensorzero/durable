@@ -135,7 +135,10 @@ impl Worker {
                     };
 
                     for task in tasks {
-                        let permit = semaphore.clone().acquire_owned().await.unwrap();
+                        // Semaphore is never closed, so this cannot fail
+                        let Ok(permit) = semaphore.clone().acquire_owned().await else {
+                            break;
+                        };
                         let pool = pool.clone();
                         let queue_name = queue_name.clone();
                         let registry = registry.clone();
@@ -179,7 +182,10 @@ impl Worker {
             .fetch_all(pool)
             .await?;
 
-        Ok(rows.into_iter().map(Into::into).collect())
+        rows.into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     async fn execute_task(
