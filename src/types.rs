@@ -155,8 +155,9 @@ pub struct WorkerOptions {
     /// Seconds between polls when queue is empty (default: 0.25)
     pub poll_interval: f64,
 
-    /// Terminate process if task exceeds 2x claim_timeout (default: true).
-    /// This is a safety measure to prevent zombie workers.
+    /// Terminate process if task exceeds 2x claim_timeout (default: false).
+    /// When false, the task is aborted but other tasks continue running.
+    /// Set to true if you need to guarantee no duplicate task execution.
     pub fatal_on_lease_timeout: bool,
 }
 
@@ -168,7 +169,7 @@ impl Default for WorkerOptions {
             batch_size: None,
             concurrency: 1,
             poll_interval: 0.25,
-            fatal_on_lease_timeout: true,
+            fatal_on_lease_timeout: false,
         }
     }
 }
