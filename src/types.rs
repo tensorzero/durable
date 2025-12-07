@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use uuid::Uuid;
 
 // Default value functions for RetryStrategy
@@ -259,4 +260,73 @@ pub struct SpawnResultRow {
 pub struct AwaitEventResult {
     pub should_suspend: bool,
     pub payload: Option<JsonValue>,
+}
+
+/// Handle to a spawned subtask.
+///
+/// This type is returned by [`TaskContext::spawn`] and can be passed to
+/// [`TaskContext::join`] to wait for the subtask to complete and retrieve
+/// its result.
+///
+/// `TaskHandle` is serializable and will be checkpointed, ensuring that
+/// retries of the parent task receive the same handle (pointing to the
+/// same subtask).
+///
+/// # Type Parameter
+///
+/// The type parameter `T` represents the output type of the spawned task.
+/// This provides compile-time type safety when joining.
+///
+/// # Example
+///
+/// ```ignore
+/// let handle: TaskHandle<ProcessResult> = ctx.spawn::<ProcessTask>("process", params).await?;
+/// let result: ProcessResult = ctx.join("process", handle).await?;
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskHandle<T> {
+    /// The spawned subtask's task_id
+    pub task_id: Uuid,
+    /// Phantom for type safety
+    #[serde(skip)]
+    _phantom: PhantomData<T>,
+}
+
+impl<T> TaskHandle<T> {
+    /// Create a new TaskHandle with the given task_id.
+    pub(crate) fn new(task_id: Uuid) -> Self {
+        Self {
+            task_id,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+/// Terminal status of a child task.
+///
+/// This enum represents the possible terminal states a subtask can be in
+/// when the parent joins on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChildStatus {
+    /// Task completed successfully
+    Completed,
+    /// Task failed after exhausting retries
+    Failed,
+    /// Task was cancelled (manually or via cascade cancellation)
+    Cancelled,
+}
+
+/// Event payload emitted when a child task reaches a terminal state.
+///
+/// This is used internally by the `join` mechanism to receive completion
+/// notifications from subtasks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ChildCompletePayload {
+    /// The terminal status of the child task
+    pub status: ChildStatus,
+    /// The task's output (only present if status is Completed)
+    pub result: Option<JsonValue>,
+    /// Error information (only present if status is Failed)
+    pub error: Option<JsonValue>,
 }
