@@ -143,6 +143,8 @@ impl Task for MyTask {
 The [`TaskContext`] provides methods for durable execution:
 
 - **`step(name, closure)`** - Execute a checkpointed operation. If the step completed in a previous run, returns the cached result.
+- **`spawn::<T>(name, params, options)`** - Spawn a subtask and return a handle.
+- **`join(name, handle)`** - Wait for a subtask to complete and get its result.
 - **`sleep_for(name, duration)`** - Suspend the task for a duration.
 - **`await_event(name, timeout)`** - Wait for an external event.
 - **`emit_event(name, payload)`** - Emit an event to wake waiting tasks.
@@ -178,11 +180,40 @@ client.emit_event(
 ).await?;
 ```
 
-### Task Composition
+### Subtasks (Spawn/Join)
 
-Tasks are independent execution units. The SDK currently does not support spawning child tasks from within a task or waiting for other tasks to complete (no built-in join/select semantics).
+Tasks can spawn subtasks and wait for their results using `spawn()` and `join()`:
 
-**For task coordination, use event-based patterns:**
+```rust
+async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    // Spawn subtasks (runs on same queue)
+    let h1 = ctx.spawn::<ProcessItem>("item-1", Item { id: 1 }, Default::default()).await?;
+    let h2 = ctx.spawn::<ProcessItem>("item-2", Item { id: 2 }, SpawnOptions {
+        max_attempts: Some(3),
+        ..Default::default()
+    }).await?;
+
+    // Do local work while subtasks run...
+    let local = ctx.step("local-work", || async { Ok(compute()) }).await?;
+
+    // Wait for subtask results
+    let r1: ItemResult = ctx.join("item-1", h1).await?;
+    let r2: ItemResult = ctx.join("item-2", h2).await?;
+
+    Ok(Output { local, children: vec![r1, r2] })
+}
+```
+
+**Key behaviors:**
+
+- **Checkpointed** - Spawns and joins are cached. If the parent retries, it gets the same subtask handles and results.
+- **Cascade cancellation** - When a parent fails or is cancelled, all its subtasks are automatically cancelled.
+- **Error propagation** - If a subtask fails, `join()` returns an error that the parent can handle.
+- **Same queue** - Subtasks run on the same queue as their parent.
+
+### Event-Based Coordination
+
+For coordination between independent tasks (not parent-child), use events:
 
 ```rust
 // Task A: Waits for a signal from Task B
@@ -197,18 +228,6 @@ client.emit_event(
     &ApprovalPayload { approved_by: "admin".into() },
     None,
 ).await?;
-```
-
-**For fan-out patterns, spawn tasks externally:**
-
-```rust
-// Orchestrator code (outside of any task)
-let mut task_ids = vec![];
-for item in items {
-    let result = client.spawn::<ProcessItemTask>(item).await?;
-    task_ids.push(result.task_id);
-}
-// Coordinate completion via events or poll task status
 ```
 
 ## API Overview
@@ -229,6 +248,7 @@ for item in items {
 | [`TaskContext`] | Context passed to task execution |
 | [`TaskResult<T>`] | Result type alias for task returns |
 | [`TaskError`] | Error type with control flow signals |
+| [`TaskHandle<T>`] | Handle to a spawned subtask (returned by `ctx.spawn()`) |
 
 ### Configuration
 

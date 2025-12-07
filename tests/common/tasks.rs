@@ -1,4 +1,4 @@
-use durable::{Task, TaskContext, TaskError, TaskResult, async_trait};
+use durable::{SpawnOptions, Task, TaskContext, TaskError, TaskHandle, TaskResult, async_trait};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -375,5 +375,209 @@ impl Task for ReservedPrefixTask {
             .step("$bad-name", || async { Ok("test".into()) })
             .await?;
         Ok(())
+    }
+}
+
+// ============================================================================
+// Child tasks for spawn/join testing
+// ============================================================================
+
+/// Simple child task that doubles a number
+pub struct DoubleTask;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DoubleParams {
+    pub value: i32,
+}
+
+#[async_trait]
+impl Task for DoubleTask {
+    const NAME: &'static str = "double";
+    type Params = DoubleParams;
+    type Output = i32;
+
+    async fn run(params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+        Ok(params.value * 2)
+    }
+}
+
+/// Child task that always fails
+pub struct FailingChildTask;
+
+#[async_trait]
+impl Task for FailingChildTask {
+    const NAME: &'static str = "failing-child";
+    type Params = ();
+    type Output = ();
+
+    async fn run(_params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+        Err(TaskError::Failed(anyhow::anyhow!(
+            "Child task failed intentionally"
+        )))
+    }
+}
+
+// ============================================================================
+// Parent tasks for spawn/join testing
+// ============================================================================
+
+/// Parent task that spawns a single child and joins it
+pub struct SingleSpawnTask;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleSpawnParams {
+    pub child_value: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleSpawnOutput {
+    pub child_result: i32,
+}
+
+#[async_trait]
+impl Task for SingleSpawnTask {
+    const NAME: &'static str = "single-spawn";
+    type Params = SingleSpawnParams;
+    type Output = SingleSpawnOutput;
+
+    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        // Spawn child task
+        let handle: TaskHandle<i32> = ctx
+            .spawn::<DoubleTask>(
+                "child",
+                DoubleParams {
+                    value: params.child_value,
+                },
+                Default::default(),
+            )
+            .await?;
+
+        // Join and get result
+        let child_result: i32 = ctx.join("child", handle).await?;
+
+        Ok(SingleSpawnOutput { child_result })
+    }
+}
+
+/// Parent task that spawns multiple children and joins them
+pub struct MultiSpawnTask;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiSpawnParams {
+    pub values: Vec<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiSpawnOutput {
+    pub results: Vec<i32>,
+}
+
+#[async_trait]
+impl Task for MultiSpawnTask {
+    const NAME: &'static str = "multi-spawn";
+    type Params = MultiSpawnParams;
+    type Output = MultiSpawnOutput;
+
+    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        // Spawn all children
+        let mut handles = Vec::new();
+        for (i, value) in params.values.iter().enumerate() {
+            let handle: TaskHandle<i32> = ctx
+                .spawn::<DoubleTask>(
+                    &format!("child-{i}"),
+                    DoubleParams { value: *value },
+                    Default::default(),
+                )
+                .await?;
+            handles.push(handle);
+        }
+
+        // Join all children (in order)
+        let mut results = Vec::new();
+        for (i, handle) in handles.into_iter().enumerate() {
+            let result: i32 = ctx.join(&format!("child-{i}"), handle).await?;
+            results.push(result);
+        }
+
+        Ok(MultiSpawnOutput { results })
+    }
+}
+
+/// Parent task that spawns a failing child
+pub struct SpawnFailingChildTask;
+
+#[async_trait]
+impl Task for SpawnFailingChildTask {
+    const NAME: &'static str = "spawn-failing-child";
+    type Params = ();
+    type Output = ();
+
+    async fn run(_params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        // Spawn with max_attempts=1 so child fails immediately without retries
+        let handle: TaskHandle<()> = ctx
+            .spawn::<FailingChildTask>(
+                "child",
+                (),
+                SpawnOptions {
+                    max_attempts: Some(1),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        // This should fail because child fails
+        ctx.join("child", handle).await?;
+        Ok(())
+    }
+}
+
+/// Slow child task (for testing cancellation)
+pub struct SlowChildTask;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlowChildParams {
+    pub sleep_ms: u64,
+}
+
+#[async_trait]
+impl Task for SlowChildTask {
+    const NAME: &'static str = "slow-child";
+    type Params = SlowChildParams;
+    type Output = String;
+
+    async fn run(params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+        tokio::time::sleep(std::time::Duration::from_millis(params.sleep_ms)).await;
+        Ok("done".to_string())
+    }
+}
+
+/// Parent task that spawns a slow child (for testing cancellation)
+pub struct SpawnSlowChildTask;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnSlowChildParams {
+    pub child_sleep_ms: u64,
+}
+
+#[async_trait]
+impl Task for SpawnSlowChildTask {
+    const NAME: &'static str = "spawn-slow-child";
+    type Params = SpawnSlowChildParams;
+    type Output = String;
+
+    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        // Spawn a slow child
+        let handle: TaskHandle<String> = ctx
+            .spawn::<SlowChildTask>(
+                "slow-child",
+                SlowChildParams {
+                    sleep_ms: params.child_sleep_ms,
+                },
+                Default::default(),
+            )
+            .await?;
+
+        // Join (this will wait for the slow child)
+        let result = ctx.join("slow-child", handle).await?;
+        Ok(result)
     }
 }
