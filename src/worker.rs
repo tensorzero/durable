@@ -2,14 +2,30 @@ use chrono::{DateTime, Utc};
 use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{RwLock, Semaphore, broadcast, mpsc};
-use tokio::time::sleep;
+use tokio::time::{Instant, sleep, sleep_until};
 use uuid::Uuid;
 
 use crate::context::TaskContext;
 use crate::error::{ControlFlow, TaskError, serialize_error};
 use crate::task::TaskRegistry;
 use crate::types::{ClaimedTask, ClaimedTaskRow, WorkerOptions};
+
+/// Notifies the worker that the lease has been extended.
+/// Used by TaskContext to reset warning/fatal timers.
+#[derive(Clone)]
+pub(crate) struct LeaseExtender {
+    tx: mpsc::Sender<Duration>,
+}
+
+impl LeaseExtender {
+    /// Signal that the lease has been extended.
+    /// Uses try_send to avoid blocking - if buffer is full, timer will reset on next send.
+    pub fn notify(&self, extend_by: Duration) {
+        let _ = self.tx.try_send(extend_by);
+    }
+}
 
 /// A background worker that processes tasks from a queue.
 ///
@@ -203,19 +219,13 @@ impl Worker {
         fatal_on_lease_timeout: bool,
     ) {
         let task_label = format!("{} ({})", task.task_name, task.task_id);
+        let task_id = task.task_id;
+        let run_id = task.run_id;
+        let start_time = Instant::now();
 
-        // Warning timer: fires after claim_timeout
-        let warn_handle = tokio::spawn({
-            let task_label = task_label.clone();
-            async move {
-                sleep(std::time::Duration::from_secs(claim_timeout)).await;
-                tracing::warn!(
-                    "Task {} exceeded claim timeout of {}s",
-                    task_label,
-                    claim_timeout
-                );
-            }
-        });
+        // Create lease extension channel - TaskContext will notify when lease is extended
+        let (lease_tx, mut lease_rx) = mpsc::channel::<Duration>(1);
+        let lease_extender = LeaseExtender { tx: lease_tx };
 
         // Create task context
         let ctx = match TaskContext::create(
@@ -223,6 +233,7 @@ impl Worker {
             queue_name.clone(),
             task.clone(),
             claim_timeout,
+            lease_extender,
         )
         .await
         {
@@ -230,7 +241,6 @@ impl Worker {
             Err(e) => {
                 tracing::error!("Failed to create task context: {}", e);
                 Self::fail_run(&pool, &queue_name, task.run_id, &e.into()).await;
-                warn_handle.abort();
                 return;
             }
         };
@@ -248,7 +258,6 @@ impl Worker {
                     &anyhow::anyhow!("Unknown task: {}", task.task_name),
                 )
                 .await;
-                warn_handle.abort();
                 return;
             }
         };
@@ -261,8 +270,80 @@ impl Worker {
         });
         let abort_handle = task_handle.abort_handle();
 
-        // Fatal timer: fires after 2x claim_timeout
-        let fatal_timeout = std::time::Duration::from_secs(claim_timeout * 2);
+        // Resettable timer task that tracks both warn and fatal deadlines.
+        // Resets whenever lease_rx receives a notification (on step()/heartbeat()).
+        // Only returns when fatal timeout is reached - never exits early.
+        let timer_handle = tokio::spawn({
+            let task_label = task_label.clone();
+            async move {
+                let mut warn_duration = Duration::from_secs(claim_timeout);
+                let mut fatal_duration = warn_duration * 2;
+                let mut warn_fired = false;
+                let mut deadline = Instant::now();
+                let mut channel_open = true;
+
+                loop {
+                    let warn_at = deadline + warn_duration;
+                    let fatal_at = deadline + fatal_duration;
+
+                    // If channel is closed, just wait for timeout without checking channel
+                    if !channel_open {
+                        tokio::select! {
+                            _ = sleep_until(warn_at), if !warn_fired => {
+                                tracing::warn!(
+                                    "Task {} exceeded claim timeout of {}s (no heartbeat/step since last extension)",
+                                    task_label,
+                                    claim_timeout
+                                );
+                                warn_fired = true;
+                            }
+
+                            _ = sleep_until(fatal_at) => {
+                                // Fatal timeout reached
+                                return;
+                            }
+                        }
+                        continue;
+                    }
+
+                    tokio::select! {
+                        biased; // Check channel first to prioritize resets
+
+                        msg = lease_rx.recv() => {
+                            if let Some(extension) = msg {
+                                // Lease extended - reset deadline and warning state
+                                warn_duration = extension;
+                                fatal_duration = extension * 2;
+                                deadline = Instant::now();
+                                warn_fired = false;
+                            } else {
+                                // Channel closed - task might be finishing, but keep timing
+                                // in case it's actually stuck. The outer select will abort
+                                // us when task completes normally.
+                                channel_open = false;
+                            }
+                        }
+
+                        _ = sleep_until(warn_at), if !warn_fired => {
+                            tracing::warn!(
+                                "Task {} exceeded claim timeout of {}s (no heartbeat/step since last extension)",
+                                task_label,
+                                claim_timeout
+                            );
+                            warn_fired = true;
+                        }
+
+                        _ = sleep_until(fatal_at) => {
+                            // Fatal timeout reached
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        let timer_abort_handle = timer_handle.abort_handle();
+
+        // Wait for either task completion or fatal timeout
         let result = tokio::select! {
             result = task_handle => {
                 match result {
@@ -274,16 +355,26 @@ impl Worker {
                     }
                 }
             }
-            _ = sleep(fatal_timeout) => {
+            _ = timer_handle => {
+                // Fatal timeout reached - timer only returns on fatal
+                let elapsed = start_time.elapsed();
                 if fatal_on_lease_timeout {
                     tracing::error!(
-                        "Task {} exceeded claim timeout by 100%; terminating process",
+                        task_id = %task_id,
+                        run_id = %run_id,
+                        elapsed_secs = elapsed.as_secs(),
+                        claim_timeout_secs = claim_timeout,
+                        "Task {} exceeded 2x claim timeout without heartbeat; terminating process",
                         task_label
                     );
                     std::process::exit(1);
                 } else {
                     tracing::error!(
-                        "Task {} exceeded claim timeout by 100%; aborting task",
+                        task_id = %task_id,
+                        run_id = %run_id,
+                        elapsed_secs = elapsed.as_secs(),
+                        claim_timeout_secs = claim_timeout,
+                        "Task {} exceeded 2x claim timeout without heartbeat; aborting task",
                         task_label
                     );
                     abort_handle.abort();
@@ -292,8 +383,8 @@ impl Worker {
             }
         };
 
-        // Cancel warning timer
-        warn_handle.abort();
+        // Cancel timer task if still running
+        timer_abort_handle.abort();
 
         // Handle result
         let Some(result) = result else {

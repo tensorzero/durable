@@ -530,6 +530,40 @@ impl Task for SpawnFailingChildTask {
     }
 }
 
+// ============================================================================
+// LongRunningHeartbeatTask - Task that runs longer than claim_timeout but heartbeats
+// ============================================================================
+
+pub struct LongRunningHeartbeatTask;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LongRunningHeartbeatParams {
+    /// Total time to run in milliseconds
+    pub total_duration_ms: u64,
+    /// Interval between heartbeats in milliseconds
+    pub heartbeat_interval_ms: u64,
+}
+
+#[async_trait]
+impl Task for LongRunningHeartbeatTask {
+    const NAME: &'static str = "long-running-heartbeat";
+    type Params = LongRunningHeartbeatParams;
+    type Output = String;
+
+    async fn run(params: Self::Params, ctx: TaskContext) -> TaskResult<Self::Output> {
+        let start = std::time::Instant::now();
+        let total_duration = std::time::Duration::from_millis(params.total_duration_ms);
+        let heartbeat_interval = std::time::Duration::from_millis(params.heartbeat_interval_ms);
+
+        while start.elapsed() < total_duration {
+            tokio::time::sleep(heartbeat_interval).await;
+            ctx.heartbeat(None).await?;
+        }
+
+        Ok("completed".to_string())
+    }
+}
+
 /// Slow child task (for testing cancellation)
 pub struct SlowChildTask;
 

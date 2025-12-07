@@ -3,6 +3,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::collections::HashMap;
+use std::time::Duration;
 use uuid::Uuid;
 
 use crate::error::{ControlFlow, TaskError, TaskResult};
@@ -11,6 +12,7 @@ use crate::types::{
     AwaitEventResult, CheckpointRow, ChildCompletePayload, ChildStatus, ClaimedTask, SpawnOptions,
     SpawnResultRow, TaskHandle,
 };
+use crate::worker::LeaseExtender;
 
 /// Context provided to task execution, enabling checkpointing and suspension.
 ///
@@ -52,6 +54,9 @@ pub struct TaskContext {
     /// Step name deduplication: tracks how many times each base name
     /// has been used. Generates: "name", "name#2", "name#3", etc.
     step_counters: HashMap<String, u32>,
+
+    /// Notifies the worker when the lease is extended via step() or heartbeat().
+    lease_extender: LeaseExtender,
 }
 
 /// Validate that a user-provided step name doesn't use reserved prefix.
@@ -72,6 +77,7 @@ impl TaskContext {
         queue_name: String,
         task: ClaimedTask,
         claim_timeout: u64,
+        lease_extender: LeaseExtender,
     ) -> Result<Self, sqlx::Error> {
         // Load all checkpoints for this task into cache
         let checkpoints: Vec<CheckpointRow> = sqlx::query_as(
@@ -99,6 +105,7 @@ impl TaskContext {
             claim_timeout,
             checkpoint_cache: cache,
             step_counters: HashMap::new(),
+            lease_extender,
         })
     }
 
@@ -180,6 +187,11 @@ impl TaskContext {
             .await?;
 
         self.checkpoint_cache.insert(name.to_string(), state_json);
+
+        // Notify worker that lease was extended so it can reset timers
+        self.lease_extender
+            .notify(Duration::from_secs(self.claim_timeout));
+
         Ok(())
     }
 
@@ -329,6 +341,10 @@ impl TaskContext {
             .bind(extend_by)
             .execute(&self.pool)
             .await?;
+
+        // Notify worker that lease was extended so it can reset timers
+        self.lease_extender
+            .notify(Duration::from_secs(extend_by as u64));
 
         Ok(())
     }

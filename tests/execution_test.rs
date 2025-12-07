@@ -591,3 +591,52 @@ async fn test_reserved_prefix_rejected(pool: PgPool) -> sqlx::Result<()> {
 
     Ok(())
 }
+
+// ============================================================================
+// Timer Reset Tests
+// ============================================================================
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_long_running_task_with_heartbeat_completes(pool: PgPool) -> sqlx::Result<()> {
+    use common::tasks::{LongRunningHeartbeatParams, LongRunningHeartbeatTask};
+
+    let client = create_client(pool.clone(), "exec_heartbeat_timer").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<LongRunningHeartbeatTask>().await;
+
+    // Run a task for 3 seconds with 1 second claim_timeout
+    // Task heartbeats every 200ms, so it should stay alive
+    let spawn_result = client
+        .spawn::<LongRunningHeartbeatTask>(LongRunningHeartbeatParams {
+            total_duration_ms: 3000,    // 3 seconds total
+            heartbeat_interval_ms: 200, // heartbeat every 200ms
+        })
+        .await
+        .expect("Failed to spawn task");
+
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 1, // 1 second claim timeout - task runs for 3x this duration
+            ..Default::default()
+        })
+        .await;
+
+    // Wait for task to complete (3 seconds + buffer)
+    tokio::time::sleep(Duration::from_millis(4000)).await;
+    worker.shutdown().await;
+
+    // Task should have completed successfully despite running longer than claim_timeout
+    let state = get_task_state(&pool, "exec_heartbeat_timer", spawn_result.task_id).await;
+    assert_eq!(
+        state, "completed",
+        "Task should complete when heartbeating properly"
+    );
+
+    let result = get_task_result(&pool, "exec_heartbeat_timer", spawn_result.task_id)
+        .await
+        .expect("Task should have a result");
+    assert_eq!(result, serde_json::json!("completed"));
+
+    Ok(())
+}
