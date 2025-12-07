@@ -6,7 +6,11 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::error::{ControlFlow, TaskError, TaskResult};
-use crate::types::{AwaitEventResult, CheckpointRow, ClaimedTask};
+use crate::task::Task;
+use crate::types::{
+    AwaitEventResult, CheckpointRow, ChildCompletePayload, ChildStatus, ClaimedTask, SpawnOptions,
+    SpawnResultRow, TaskHandle,
+};
 
 /// Context provided to task execution, enabling checkpointing and suspension.
 ///
@@ -399,5 +403,190 @@ impl TaskContext {
         let value = Uuid::now_v7();
         self.persist_checkpoint(&checkpoint_name, &value).await?;
         Ok(value)
+    }
+
+    /// Spawn a subtask on the same queue.
+    ///
+    /// The subtask runs independently and can be awaited using [`join`](Self::join).
+    /// The spawn is checkpointed - if the parent task retries, the same subtask
+    /// handle is returned (the subtask won't be spawned again).
+    ///
+    /// When the parent task completes, fails, or is cancelled, all of its
+    /// subtasks are automatically cancelled (cascade cancellation).
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Unique name for this spawn operation (used for checkpointing)
+    /// * `params` - Parameters to pass to the subtask
+    /// * `options` - Spawn options (retry strategy, max attempts, etc.)
+    ///
+    /// # Returns
+    ///
+    /// A [`TaskHandle`] that can be passed to [`join`](Self::join) to wait for
+    /// the subtask to complete and retrieve its result.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Spawn two subtasks
+    /// let h1 = ctx.spawn::<ProcessItem>("item-1", Item { id: 1 }, Default::default()).await?;
+    /// let h2 = ctx.spawn::<ProcessItem>("item-2", Item { id: 2 }, SpawnOptions {
+    ///     max_attempts: Some(3),
+    ///     ..Default::default()
+    /// }).await?;
+    ///
+    /// // Do work while subtasks run...
+    ///
+    /// // Wait for results
+    /// let r1: ItemResult = ctx.join("item-1", h1).await?;
+    /// let r2: ItemResult = ctx.join("item-2", h2).await?;
+    /// ```
+    pub async fn spawn<T: Task>(
+        &mut self,
+        name: &str,
+        params: T::Params,
+        options: crate::SpawnOptions,
+    ) -> TaskResult<TaskHandle<T::Output>> {
+        validate_user_name(name)?;
+        let checkpoint_name = self.get_checkpoint_name(&format!("$spawn:{name}"));
+
+        // Return cached task_id if already spawned
+        if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
+            let task_id: Uuid = serde_json::from_value(cached.clone())?;
+            return Ok(TaskHandle::new(task_id));
+        }
+
+        // Build options JSON, merging user options with parent_task_id
+        let params_json = serde_json::to_value(&params)?;
+        #[derive(Serialize)]
+        struct SubtaskOptions<'a> {
+            parent_task_id: Uuid,
+            #[serde(flatten)]
+            options: &'a SpawnOptions,
+        }
+        let options_json = serde_json::to_value(SubtaskOptions {
+            parent_task_id: self.task_id,
+            options: &options,
+        })?;
+
+        let row: SpawnResultRow = sqlx::query_as(
+            "SELECT task_id, run_id, attempt FROM durable.spawn_task($1, $2, $3, $4)",
+        )
+        .bind(&self.queue_name)
+        .bind(T::NAME)
+        .bind(&params_json)
+        .bind(&options_json)
+        .fetch_one(&self.pool)
+        .await?;
+
+        // Checkpoint the spawn
+        self.persist_checkpoint(&checkpoint_name, &row.task_id)
+            .await?;
+
+        Ok(TaskHandle::new(row.task_id))
+    }
+
+    /// Wait for a subtask to complete and return its result.
+    ///
+    /// If the subtask has already completed, returns immediately with the
+    /// cached result. Otherwise, suspends the parent task until the subtask
+    /// finishes.
+    ///
+    /// The join is checkpointed - if the parent task retries after a successful
+    /// join, the cached result is returned without waiting.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Unique name for this join operation (used for checkpointing)
+    /// * `handle` - The [`TaskHandle`] returned by [`spawn`](Self::spawn)
+    ///
+    /// # Errors
+    ///
+    /// * `TaskError::Failed` - If the subtask failed (with the subtask's error message)
+    /// * `TaskError::Failed` - If the subtask was cancelled
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let handle = ctx.spawn::<ComputeTask>("compute", params).await?;
+    /// // ... do other work ...
+    /// let result: ComputeResult = ctx.join("compute", handle).await?;
+    /// ```
+    pub async fn join<T: DeserializeOwned>(
+        &mut self,
+        name: &str,
+        handle: TaskHandle<T>,
+    ) -> TaskResult<T> {
+        validate_user_name(name)?;
+        let event_name = format!("$child:{}", handle.task_id);
+
+        // await_event handles checkpointing and suspension
+        // We use the internal event name which starts with $ so we need to bypass validation
+        let step_name = format!("$awaitEvent:{event_name}");
+        let checkpoint_name = self.get_checkpoint_name(&step_name);
+
+        // Check cache for already-received event
+        if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
+            let payload: ChildCompletePayload = serde_json::from_value(cached.clone())?;
+            return Self::process_child_payload(payload);
+        }
+
+        // Check if we were woken by this event but it timed out (null payload)
+        if self.task.wake_event.as_deref() == Some(&event_name) && self.task.event_payload.is_none()
+        {
+            return Err(TaskError::Failed(anyhow::anyhow!(
+                "Timed out waiting for child task to complete"
+            )));
+        }
+
+        // Call await_event stored procedure (no timeout for join - we wait indefinitely)
+        let query = "SELECT should_suspend, payload
+             FROM durable.await_event($1, $2, $3, $4, $5, $6)";
+
+        let result: AwaitEventResult = sqlx::query_as(query)
+            .bind(&self.queue_name)
+            .bind(self.task_id)
+            .bind(self.run_id)
+            .bind(&checkpoint_name)
+            .bind(&event_name)
+            .bind(None::<i32>) // No timeout
+            .fetch_one(&self.pool)
+            .await?;
+
+        if result.should_suspend {
+            return Err(TaskError::Control(ControlFlow::Suspend));
+        }
+
+        // Event arrived - parse and return
+        let payload_json = result.payload.unwrap_or(JsonValue::Null);
+        self.checkpoint_cache
+            .insert(checkpoint_name, payload_json.clone());
+
+        let payload: ChildCompletePayload = serde_json::from_value(payload_json)?;
+        Self::process_child_payload(payload)
+    }
+
+    /// Process the child completion payload and return the appropriate result.
+    fn process_child_payload<T: DeserializeOwned>(payload: ChildCompletePayload) -> TaskResult<T> {
+        match payload.status {
+            ChildStatus::Completed => {
+                let result = payload.result.ok_or_else(|| {
+                    TaskError::Failed(anyhow::anyhow!("Child completed but no result available"))
+                })?;
+                Ok(serde_json::from_value(result)?)
+            }
+            ChildStatus::Failed => {
+                let msg = payload
+                    .error
+                    .and_then(|e| e.get("message").and_then(|m| m.as_str()).map(String::from))
+                    .unwrap_or_else(|| "Child task failed".to_string());
+                Err(TaskError::Failed(anyhow::anyhow!(
+                    "Child task failed: {msg}",
+                )))
+            }
+            ChildStatus::Cancelled => Err(TaskError::Failed(anyhow::anyhow!(
+                "Child task was cancelled"
+            ))),
+        }
     }
 }

@@ -72,6 +72,7 @@ begin
         retry_strategy jsonb,
         max_attempts integer,
         cancellation jsonb,
+        parent_task_id uuid,
         enqueue_at timestamptz not null default durable.current_time(),
         first_started_at timestamptz,
         state text not null check (state in (''pending'', ''running'', ''sleeping'', ''completed'', ''failed'', ''cancelled'')),
@@ -155,6 +156,13 @@ begin
     'create index if not exists %I on durable.%I (event_name)',
     ('w_' || p_queue_name) || '_eni',
     'w_' || p_queue_name
+  );
+
+  -- Index for finding children of a parent task (for cascade cancellation)
+  execute format(
+    'create index if not exists %I on durable.%I (parent_task_id) where parent_task_id is not null',
+    ('t_' || p_queue_name) || '_pti',
+    't_' || p_queue_name
   );
 end;
 $$;
@@ -242,6 +250,7 @@ declare
   v_retry_strategy jsonb;
   v_max_attempts integer;
   v_cancellation jsonb;
+  v_parent_task_id uuid;
   v_now timestamptz := durable.current_time();
   v_params jsonb := coalesce(p_params, 'null'::jsonb);
 begin
@@ -259,14 +268,16 @@ begin
       end if;
     end if;
     v_cancellation := p_options->'cancellation';
+    -- Extract parent_task_id for subtask tracking
+    v_parent_task_id := (p_options->>'parent_task_id')::uuid;
   end if;
 
   execute format(
-    'insert into durable.%I (task_id, task_name, params, headers, retry_strategy, max_attempts, cancellation, enqueue_at, first_started_at, state, attempts, last_attempt_run, completed_payload, cancelled_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, null, ''pending'', $9, $10, null, null)',
+    'insert into durable.%I (task_id, task_name, params, headers, retry_strategy, max_attempts, cancellation, parent_task_id, enqueue_at, first_started_at, state, attempts, last_attempt_run, completed_payload, cancelled_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, null, ''pending'', $10, $11, null, null)',
     't_' || p_queue_name
   )
-  using v_task_id, p_task_name, v_params, v_headers, v_retry_strategy, v_max_attempts, v_cancellation, v_now, v_attempt, v_run_id;
+  using v_task_id, p_task_name, v_params, v_headers, v_retry_strategy, v_max_attempts, v_cancellation, v_parent_task_id, v_now, v_attempt, v_run_id;
 
   execute format(
     'insert into durable.%I (run_id, task_id, attempt, state, available_at, wake_event, event_payload, result, failure_reason)
@@ -456,7 +467,7 @@ begin
 end;
 $$;
 
--- Markes a run as completed
+-- Marks a run as completed
 create function durable.complete_run (
   p_queue_name text,
   p_run_id uuid,
@@ -468,6 +479,7 @@ as $$
 declare
   v_task_id uuid;
   v_state text;
+  v_parent_task_id uuid;
   v_now timestamptz := durable.current_time();
 begin
   execute format(
@@ -497,19 +509,32 @@ begin
     'r_' || p_queue_name
   ) using p_run_id, v_now, p_state;
 
+  -- Get parent_task_id to check if this is a subtask
   execute format(
     'update durable.%I
         set state = ''completed'',
             completed_payload = $2,
             last_attempt_run = $3
-      where task_id = $1',
+      where task_id = $1
+      returning parent_task_id',
     't_' || p_queue_name
-  ) using v_task_id, p_state, p_run_id;
+  )
+  into v_parent_task_id
+  using v_task_id, p_state, p_run_id;
 
   execute format(
     'delete from durable.%I where run_id = $1',
     'w_' || p_queue_name
   ) using p_run_id;
+
+  -- Emit completion event for parent to join on (only if this is a subtask)
+  if v_parent_task_id is not null then
+    perform durable.emit_event(
+      p_queue_name,
+      '$child:' || v_task_id::text,
+      jsonb_build_object('status', 'completed', 'result', p_state)
+    );
+  end if;
 end;
 $$;
 
@@ -559,6 +584,71 @@ begin
 end;
 $$;
 
+-- Recursively cancels all children of a parent task.
+-- Used when a parent task fails or is cancelled to cascade the cancellation.
+create function durable.cascade_cancel_children (
+  p_queue_name text,
+  p_parent_task_id uuid
+)
+  returns void
+  language plpgsql
+as $$
+declare
+  v_child_id uuid;
+  v_child_state text;
+  v_now timestamptz := durable.current_time();
+begin
+  -- Find all children of this parent that are not in terminal state
+  for v_child_id, v_child_state in
+    execute format(
+      'select task_id, state
+         from durable.%I
+        where parent_task_id = $1
+          and state not in (''completed'', ''failed'', ''cancelled'')
+        for update',
+      't_' || p_queue_name
+    )
+    using p_parent_task_id
+  loop
+    -- Cancel the child task
+    execute format(
+      'update durable.%I
+          set state = ''cancelled'',
+              cancelled_at = coalesce(cancelled_at, $2)
+        where task_id = $1',
+      't_' || p_queue_name
+    ) using v_child_id, v_now;
+
+    -- Cancel all runs of this child
+    execute format(
+      'update durable.%I
+          set state = ''cancelled'',
+              claimed_by = null,
+              claim_expires_at = null
+        where task_id = $1
+          and state not in (''completed'', ''failed'', ''cancelled'')',
+      'r_' || p_queue_name
+    ) using v_child_id;
+
+    -- Delete wait registrations
+    execute format(
+      'delete from durable.%I where task_id = $1',
+      'w_' || p_queue_name
+    ) using v_child_id;
+
+    -- Emit cancellation event so parent's join() can receive it
+    perform durable.emit_event(
+      p_queue_name,
+      '$child:' || v_child_id::text,
+      jsonb_build_object('status', 'cancelled')
+    );
+
+    -- Recursively cancel grandchildren
+    perform durable.cascade_cancel_children(p_queue_name, v_child_id);
+  end loop;
+end;
+$$;
+
 create function durable.fail_run (
   p_queue_name text,
   p_run_id uuid,
@@ -591,6 +681,7 @@ declare
   v_recorded_attempt integer;
   v_last_attempt_run uuid := p_run_id;
   v_cancelled_at timestamptz := null;
+  v_parent_task_id uuid;
 begin
   execute format(
     'select r.task_id, r.attempt
@@ -608,13 +699,13 @@ begin
   end if;
 
   execute format(
-    'select retry_strategy, max_attempts, first_started_at, cancellation, state
+    'select retry_strategy, max_attempts, first_started_at, cancellation, state, parent_task_id
        from durable.%I
       where task_id = $1
       for update',
     't_' || p_queue_name
   )
-  into v_retry_strategy, v_max_attempts, v_first_started, v_cancellation, v_task_state
+  into v_retry_strategy, v_max_attempts, v_first_started, v_cancellation, v_task_state, v_parent_task_id
   using v_task_id;
 
   execute format(
@@ -703,6 +794,21 @@ begin
     'delete from durable.%I where run_id = $1',
     'w_' || p_queue_name
   ) using p_run_id;
+
+  -- If task reached terminal failure state (failed or cancelled), emit event and cascade cancel
+  if v_task_state_after in ('failed', 'cancelled') then
+    -- Cascade cancel all children
+    perform durable.cascade_cancel_children(p_queue_name, v_task_id);
+
+    -- Emit completion event for parent to join on (only if this is a subtask)
+    if v_parent_task_id is not null then
+      perform durable.emit_event(
+        p_queue_name,
+        '$child:' || v_task_id::text,
+        jsonb_build_object('status', v_task_state_after, 'error', p_reason)
+      );
+    end if;
+  end if;
 end;
 $$;
 
@@ -1138,15 +1244,16 @@ as $$
 declare
   v_now timestamptz := durable.current_time();
   v_task_state text;
+  v_parent_task_id uuid;
 begin
   execute format(
-    'select state
+    'select state, parent_task_id
        from durable.%I
       where task_id = $1
       for update',
     't_' || p_queue_name
   )
-  into v_task_state
+  into v_task_state, v_parent_task_id
   using p_task_id;
 
   if v_task_state is null then
@@ -1179,6 +1286,18 @@ begin
     'delete from durable.%I where task_id = $1',
     'w_' || p_queue_name
   ) using p_task_id;
+
+  -- Cascade cancel all children
+  perform durable.cascade_cancel_children(p_queue_name, p_task_id);
+
+  -- Emit cancellation event for parent to join on (only if this is a subtask)
+  if v_parent_task_id is not null then
+    perform durable.emit_event(
+      p_queue_name,
+      '$child:' || p_task_id::text,
+      jsonb_build_object('status', 'cancelled')
+    );
+  end if;
 end;
 $$;
 
