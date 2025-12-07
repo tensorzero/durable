@@ -15,8 +15,7 @@ use crate::types::{AwaitEventResult, CheckpointRow, ClaimedTask};
 ///
 /// - **Checkpointing** via [`step`](Self::step) - Execute operations that are cached
 ///   and not re-executed on retry
-/// - **Sleeping** via [`sleep_for`](Self::sleep_for) and [`sleep_until`](Self::sleep_until) -
-///   Suspend the task for a duration or until a specific time
+/// - **Sleeping** via [`sleep_for`](Self::sleep_for) - Suspend the task for a duration
 /// - **Events** via [`await_event`](Self::await_event) and [`emit_event`](Self::emit_event) -
 ///   Wait for or emit events to coordinate between tasks
 /// - **Lease management** via [`heartbeat`](Self::heartbeat) - Extend the task lease
@@ -185,50 +184,25 @@ impl TaskContext {
     /// The task will be rescheduled to run after the duration elapses.
     /// This is checkpointed - if the task is retried, the original wake
     /// time is preserved (won't extend the sleep on retry).
+    ///
+    /// Wake time is computed using the database clock to ensure consistency
+    /// with the scheduler and enable deterministic testing via `durable.fake_now`.
     pub async fn sleep_for(&mut self, name: &str, duration: std::time::Duration) -> TaskResult<()> {
         validate_user_name(name)?;
-        let wake_at = Utc::now()
-            + chrono::Duration::from_std(duration)
-                .map_err(|e| TaskError::Failed(anyhow::anyhow!("Invalid duration: {e}")))?;
-        self.sleep_until(name, wake_at).await
-    }
-
-    /// Suspend the task until a specific time.
-    ///
-    /// The wake time is checkpointed, so code changes won't affect when
-    /// the task actually resumes. If the time has already passed when
-    /// this is called (e.g., on retry), returns immediately.
-    pub async fn sleep_until(&mut self, name: &str, wake_at: DateTime<Utc>) -> TaskResult<()> {
-        validate_user_name(name)?;
         let checkpoint_name = self.get_checkpoint_name(name);
+        let duration_ms = duration.as_millis() as i64;
 
-        // Check if we have a stored wake time from a previous run
-        let actual_wake_at = if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
-            let stored: String = serde_json::from_value(cached.clone())?;
-            DateTime::parse_from_rfc3339(&stored)
-                .map_err(|e| TaskError::Failed(anyhow::anyhow!("Invalid stored time: {e}")))?
-                .with_timezone(&Utc)
-        } else {
-            // Store the wake time for future runs
-            self.persist_checkpoint(&checkpoint_name, &wake_at.to_rfc3339())
-                .await?;
-            wake_at
-        };
+        let (needs_suspend,): (bool,) = sqlx::query_as("SELECT durable.sleep_for($1, $2, $3, $4)")
+            .bind(&self.queue_name)
+            .bind(self.run_id)
+            .bind(&checkpoint_name)
+            .bind(duration_ms)
+            .fetch_one(&self.pool)
+            .await?;
 
-        // If wake time hasn't passed yet, suspend
-        if Utc::now() < actual_wake_at {
-            let query = "SELECT durable.schedule_run($1, $2, $3)";
-            sqlx::query(query)
-                .bind(&self.queue_name)
-                .bind(self.run_id)
-                .bind(actual_wake_at)
-                .execute(&self.pool)
-                .await?;
-
+        if needs_suspend {
             return Err(TaskError::Control(ControlFlow::Suspend));
         }
-
-        // Wake time has passed, continue execution
         Ok(())
     }
 

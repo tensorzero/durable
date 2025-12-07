@@ -10,8 +10,7 @@ use thiserror::Error;
 pub enum ControlFlow {
     /// Task should suspend and resume later.
     ///
-    /// Returned by [`TaskContext::sleep_for`](crate::TaskContext::sleep_for),
-    /// [`TaskContext::sleep_until`](crate::TaskContext::sleep_until),
+    /// Returned by [`TaskContext::sleep_for`](crate::TaskContext::sleep_for)
     /// and [`TaskContext::await_event`](crate::TaskContext::await_event)
     /// when the task needs to wait.
     Suspend,

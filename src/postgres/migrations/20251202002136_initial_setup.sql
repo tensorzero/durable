@@ -19,7 +19,7 @@
 -- Task execution flows through `spawn_task`, which records the logical task and
 -- its first run, and `claim_task`, which hands work to workers with leasing
 -- semantics, state transitions, and cancellation checks.  Runtime routines
--- such as `complete_run`, `schedule_run`, and `fail_run` advance or retry work,
+-- such as `complete_run`, `sleep_for`, and `fail_run` advance or retry work,
 -- enforce attempt accounting, and keep the task and run tables synchronized.
 --
 -- Long-running or event-driven workflows rely on lightweight persistence
@@ -513,32 +513,54 @@ begin
 end;
 $$;
 
-create function durable.schedule_run (
+create function durable.sleep_for(
   p_queue_name text,
   p_run_id uuid,
-  p_wake_at timestamptz
+  p_checkpoint_name text,
+  p_duration_ms bigint
 )
-  returns void
+  returns boolean  -- true = suspended, false = wake time already passed
   language plpgsql
 as $$
 declare
+  v_wake_at timestamptz;
+  v_existing_state jsonb;
+  v_now timestamptz := durable.current_time();
   v_task_id uuid;
 begin
+  -- Get task_id from run (needed for checkpoint table key)
   execute format(
-    'select task_id
-       from durable.%I
-      where run_id = $1
-        and state = ''running''
-      for update',
+    'select task_id from durable.%I where run_id = $1 and state = ''running'' for update',
     'r_' || p_queue_name
-  )
-  into v_task_id
-  using p_run_id;
+  ) into v_task_id using p_run_id;
 
   if v_task_id is null then
     raise exception 'Run "%" is not currently running in queue "%"', p_run_id, p_queue_name;
   end if;
 
+  -- Check for existing checkpoint, else compute and store wake time
+  execute format(
+    'select state from durable.%I where task_id = $1 and checkpoint_name = $2',
+    'c_' || p_queue_name
+  ) into v_existing_state using v_task_id, p_checkpoint_name;
+
+  if v_existing_state is not null then
+    v_wake_at := (v_existing_state #>> '{}')::timestamptz;
+  else
+    v_wake_at := v_now + (p_duration_ms || ' milliseconds')::interval;
+    execute format(
+      'insert into durable.%I (task_id, checkpoint_name, state, status, owner_run_id, updated_at)
+       values ($1, $2, $3, ''committed'', $4, $5)',
+      'c_' || p_queue_name
+    ) using v_task_id, p_checkpoint_name, to_jsonb(v_wake_at::text), p_run_id, v_now;
+  end if;
+
+  -- If wake time passed, return false (no suspend needed)
+  if v_now >= v_wake_at then
+    return false;
+  end if;
+
+  -- Schedule the run to wake at v_wake_at
   execute format(
     'update durable.%I
         set state = ''sleeping'',
@@ -548,7 +570,7 @@ begin
             wake_event = null
       where run_id = $1',
     'r_' || p_queue_name
-  ) using p_run_id, p_wake_at;
+  ) using p_run_id, v_wake_at;
 
   execute format(
     'update durable.%I
@@ -556,6 +578,8 @@ begin
       where task_id = $1',
     't_' || p_queue_name
   ) using v_task_id;
+
+  return true;
 end;
 $$;
 

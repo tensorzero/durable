@@ -144,7 +144,6 @@ The [`TaskContext`] provides methods for durable execution:
 
 - **`step(name, closure)`** - Execute a checkpointed operation. If the step completed in a previous run, returns the cached result.
 - **`sleep_for(name, duration)`** - Suspend the task for a duration.
-- **`sleep_until(name, datetime)`** - Suspend until a specific time.
 - **`await_event(name, timeout)`** - Wait for an external event.
 - **`emit_event(name, payload)`** - Emit an event to wake waiting tasks.
 - **`heartbeat(duration)`** - Extend the task lease for long operations.
