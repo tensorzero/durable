@@ -113,19 +113,26 @@ impl Worker {
 
                 // Poll for new tasks
                 _ = sleep(poll_interval) => {
-                    let available = semaphore.available_permits();
-                    if available == 0 {
-                        continue;
+                    // Acquire permits BEFORE claiming tasks to avoid claiming
+                    // tasks from DB that we can't immediately execute
+                    let mut permits = Vec::new();
+                    for _ in 0..batch_size {
+                        match semaphore.clone().try_acquire_owned() {
+                            Ok(permit) => permits.push(permit),
+                            Err(_) => break,
+                        }
                     }
 
-                    let to_claim = available.min(batch_size);
+                    if permits.is_empty() {
+                        continue;
+                    }
 
                     let tasks = match Self::claim_tasks(
                         &pool,
                         &queue_name,
                         &worker_id,
                         claim_timeout,
-                        to_claim,
+                        permits.len(),
                     ).await {
                         Ok(tasks) => tasks,
                         Err(e) => {
@@ -134,11 +141,10 @@ impl Worker {
                         }
                     };
 
-                    for task in tasks {
-                        // Semaphore is never closed, so this cannot fail
-                        let Ok(permit) = semaphore.clone().acquire_owned().await else {
-                            break;
-                        };
+                    // Return unused permits (if we claimed fewer tasks than permits acquired)
+                    let permits = permits.into_iter().take(tasks.len());
+
+                    for (task, permit) in tasks.into_iter().zip(permits) {
                         let pool = pool.clone();
                         let queue_name = queue_name.clone();
                         let registry = registry.clone();
@@ -211,23 +217,6 @@ impl Worker {
             }
         });
 
-        // Fatal timer: fires after 2x claim_timeout (kills process)
-        let fatal_handle = if fatal_on_lease_timeout {
-            Some(tokio::spawn({
-                let task_label = task_label.clone();
-                async move {
-                    sleep(std::time::Duration::from_secs(claim_timeout * 2)).await;
-                    tracing::error!(
-                        "Task {} exceeded claim timeout by 100%; terminating process",
-                        task_label
-                    );
-                    std::process::exit(1);
-                }
-            }))
-        } else {
-            None
-        };
-
         // Create task context
         let ctx = match TaskContext::create(
             pool.clone(),
@@ -242,9 +231,6 @@ impl Worker {
                 tracing::error!("Failed to create task context: {}", e);
                 Self::fail_run(&pool, &queue_name, task.run_id, &e.into()).await;
                 warn_handle.abort();
-                if let Some(h) = fatal_handle {
-                    h.abort();
-                }
                 return;
             }
         };
@@ -263,24 +249,63 @@ impl Worker {
                 )
                 .await;
                 warn_handle.abort();
-                if let Some(h) = fatal_handle {
-                    h.abort();
-                }
                 return;
             }
         };
         drop(registry);
 
-        // Execute task
-        let result = handler.execute(task.params.clone(), ctx).await;
+        // Execute task with timeout enforcement
+        let task_handle = tokio::spawn({
+            let params = task.params.clone();
+            async move { handler.execute(params, ctx).await }
+        });
+        let abort_handle = task_handle.abort_handle();
 
-        // Cancel timers
+        // Fatal timer: fires after 2x claim_timeout
+        let fatal_timeout = std::time::Duration::from_secs(claim_timeout * 2);
+        let result = tokio::select! {
+            result = task_handle => {
+                match result {
+                    Ok(r) => Some(r),
+                    Err(e) if e.is_cancelled() => None, // Task was aborted
+                    Err(e) => {
+                        tracing::error!("Task {} panicked: {}", task_label, e);
+                        Some(Err(TaskError::Failed(anyhow::anyhow!("Task panicked: {e}"))))
+                    }
+                }
+            }
+            _ = sleep(fatal_timeout) => {
+                if fatal_on_lease_timeout {
+                    tracing::error!(
+                        "Task {} exceeded claim timeout by 100%; terminating process",
+                        task_label
+                    );
+                    std::process::exit(1);
+                } else {
+                    tracing::error!(
+                        "Task {} exceeded claim timeout by 100%; aborting task",
+                        task_label
+                    );
+                    abort_handle.abort();
+                    None
+                }
+            }
+        };
+
+        // Cancel warning timer
         warn_handle.abort();
-        if let Some(h) = fatal_handle {
-            h.abort();
-        }
 
         // Handle result
+        let Some(result) = result else {
+            // Task was aborted due to timeout - don't mark as failed since
+            // another worker will pick it up after claim expires
+            tracing::warn!(
+                "Task {} aborted due to timeout, will be retried",
+                task_label
+            );
+            return;
+        };
+
         match result {
             Ok(output) => {
                 Self::complete_run(&pool, &queue_name, task.run_id, output).await;
