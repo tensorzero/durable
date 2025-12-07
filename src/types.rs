@@ -106,21 +106,26 @@ pub struct CancellationPolicy {
 ///     ..Default::default()
 /// };
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct SpawnOptions {
     /// Maximum number of attempts before permanent failure (default: 5)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
 
     /// Retry strategy (default: Fixed with 5s delay)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_strategy: Option<RetryStrategy>,
 
     /// Custom headers stored with the task (arbitrary metadata)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub headers: Option<HashMap<String, JsonValue>>,
 
-    /// Override the queue name
+    /// Override the queue name (not serialized - handled separately)
+    #[serde(skip)]
     pub queue: Option<String>,
 
     /// Cancellation policy
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cancellation: Option<CancellationPolicy>,
 }
 

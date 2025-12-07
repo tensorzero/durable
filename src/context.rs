@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::error::{ControlFlow, TaskError, TaskResult};
 use crate::task::Task;
 use crate::types::{
-    AwaitEventResult, CheckpointRow, ChildCompletePayload, ChildStatus, ClaimedTask,
+    AwaitEventResult, CheckpointRow, ChildCompletePayload, ChildStatus, ClaimedTask, SpawnOptions,
     SpawnResultRow, TaskHandle,
 };
 
@@ -458,22 +458,16 @@ impl TaskContext {
 
         // Build options JSON, merging user options with parent_task_id
         let params_json = serde_json::to_value(&params)?;
-        let mut options_json = serde_json::json!({
-            "parent_task_id": self.task_id
-        });
-        if let Some(max_attempts) = options.max_attempts {
-            options_json["max_attempts"] = serde_json::json!(max_attempts);
+        #[derive(Serialize)]
+        struct SubtaskOptions<'a> {
+            parent_task_id: Uuid,
+            #[serde(flatten)]
+            options: &'a SpawnOptions,
         }
-        if let Some(retry_strategy) = &options.retry_strategy {
-            options_json["retry_strategy"] = serde_json::to_value(retry_strategy)?;
-        }
-        if let Some(headers) = &options.headers {
-            options_json["headers"] = serde_json::to_value(headers)?;
-        }
-        if let Some(cancellation) = &options.cancellation {
-            options_json["cancellation"] = serde_json::to_value(cancellation)?;
-        }
-        // Note: options.queue is ignored - subtasks always use parent's queue
+        let options_json = serde_json::to_value(SubtaskOptions {
+            parent_task_id: self.task_id,
+            options: &options,
+        })?;
 
         let row: SpawnResultRow = sqlx::query_as(
             "SELECT task_id, run_id, attempt FROM durable.spawn_task($1, $2, $3, $4)",
