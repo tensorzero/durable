@@ -113,19 +113,26 @@ impl Worker {
 
                 // Poll for new tasks
                 _ = sleep(poll_interval) => {
-                    let available = semaphore.available_permits();
-                    if available == 0 {
-                        continue;
+                    // Acquire permits BEFORE claiming tasks to avoid claiming
+                    // tasks from DB that we can't immediately execute
+                    let mut permits = Vec::new();
+                    for _ in 0..batch_size {
+                        match semaphore.clone().try_acquire_owned() {
+                            Ok(permit) => permits.push(permit),
+                            Err(_) => break,
+                        }
                     }
 
-                    let to_claim = available.min(batch_size);
+                    if permits.is_empty() {
+                        continue;
+                    }
 
                     let tasks = match Self::claim_tasks(
                         &pool,
                         &queue_name,
                         &worker_id,
                         claim_timeout,
-                        to_claim,
+                        permits.len(),
                     ).await {
                         Ok(tasks) => tasks,
                         Err(e) => {
@@ -134,11 +141,10 @@ impl Worker {
                         }
                     };
 
-                    for task in tasks {
-                        // Semaphore is never closed, so this cannot fail
-                        let Ok(permit) = semaphore.clone().acquire_owned().await else {
-                            break;
-                        };
+                    // Return unused permits (if we claimed fewer tasks than permits acquired)
+                    let permits = permits.into_iter().take(tasks.len());
+
+                    for (task, permit) in tasks.into_iter().zip(permits) {
                         let pool = pool.clone();
                         let queue_name = queue_name.clone();
                         let registry = registry.clone();
