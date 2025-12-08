@@ -328,18 +328,22 @@ create function durable.claim_task (
 as $$
 declare
   v_now timestamptz := durable.current_time();
-  v_claim_timeout integer := greatest(coalesce(p_claim_timeout, 30), 0);
+  v_claim_timeout integer := coalesce(p_claim_timeout, 30);
   v_worker_id text := coalesce(nullif(p_worker_id, ''), 'worker');
   v_qty integer := greatest(coalesce(p_qty, 1), 1);
-  v_claim_until timestamptz := null;
+  v_claim_until timestamptz;
   v_sql text;
   v_expired_run record;
 begin
-  if v_claim_timeout > 0 then
-    v_claim_until := v_now + make_interval(secs => v_claim_timeout);
+  if v_claim_timeout <= 0 then
+    raise exception 'claim_timeout must be greater than zero';
   end if;
 
+  v_claim_until := v_now + make_interval(secs => v_claim_timeout);
+
   -- Apply cancellation rules before claiming.
+  -- These are max_delay (delay before starting) and
+  -- max_duration (duration from created to finished)
   execute format(
     'with limits as (
         select task_id,
@@ -375,6 +379,7 @@ begin
     't_' || p_queue_name
   ) using v_now;
 
+  -- Fail any run claims that have timed out
   for v_expired_run in
     execute format(
       'select run_id,
@@ -404,6 +409,8 @@ begin
     );
   end loop;
 
+  -- Find all tasks where state is cancelled,
+  -- then update all the runs to be cancelled as well.
   execute format(
     'update durable.%I r
         set state = ''cancelled'',
@@ -417,7 +424,9 @@ begin
     't_' || p_queue_name
   ) using v_now;
 
+  -- Actually claim tasks
   v_sql := format(
+    -- Grab unique pending / sleeping runs that are available now
     'with candidate as (
         select r.run_id
           from durable.%1$I r
@@ -429,6 +438,7 @@ begin
          limit $2
          for update skip locked
      ),
+     -- update the runs to be running and set claim info
      updated as (
         update durable.%1$I r
            set state = ''running'',
@@ -439,6 +449,7 @@ begin
          where run_id in (select run_id from candidate)
          returning r.run_id, r.task_id, r.attempt
      ),
+     -- update the task to also be running and handle attempt / time bookkeeping
      task_upd as (
         update durable.%2$I t
            set state = ''running'',
@@ -449,6 +460,10 @@ begin
          where t.task_id = u.task_id
          returning t.task_id
      ),
+     -- clean up any wait registrations that timed out
+     -- that are subsumed by the claim
+     -- e.g. a wait times out so the run becomes available and now
+     -- it is claimed but we don't want this wait to linger in DB
      wait_cleanup as (
         delete from durable.%3$I w
          using updated u
@@ -536,6 +551,7 @@ begin
   into v_parent_task_id
   using v_task_id, p_state, p_run_id;
 
+  -- Clean up any wait registrations for this run
   execute format(
     'delete from durable.%I where run_id = $1',
     'w_' || p_queue_name
@@ -721,6 +737,7 @@ declare
   v_cancelled_at timestamptz := null;
   v_parent_task_id uuid;
 begin
+  -- find the run to fail
   execute format(
     'select r.task_id, r.attempt
        from durable.%I r
@@ -736,6 +753,7 @@ begin
     raise exception 'Run "%" cannot be failed in queue "%"', p_run_id, p_queue_name;
   end if;
 
+  -- get the retry strategy and metadata about task
   execute format(
     'select retry_strategy, max_attempts, first_started_at, cancellation, state, parent_task_id
        from durable.%I
@@ -746,6 +764,7 @@ begin
   into v_retry_strategy, v_max_attempts, v_first_started, v_cancellation, v_task_state, v_parent_task_id
   using v_task_id;
 
+  -- actually fail the run
   execute format(
     'update durable.%I
         set state = ''failed'',
@@ -760,6 +779,7 @@ begin
   v_task_state_after := 'failed';
   v_recorded_attempt := v_attempt;
 
+  -- compute the next retry time
   if v_max_attempts is null or v_next_attempt <= v_max_attempts then
     if p_retry_at is not null then
       v_next_available := p_retry_at;
@@ -795,6 +815,7 @@ begin
       end if;
     end if;
 
+    -- set up the new run if not cancelling
     if not v_task_cancel then
       v_task_state_after := case when v_next_available > v_now then 'sleeping' else 'pending' end;
       v_new_run_id := durable.portable_uuidv7();
@@ -850,13 +871,17 @@ begin
 end;
 $$;
 
+-- sets the checkpoint state for a given task and step name.
+-- only updates if the owner_run's attempt is >= existing owner's attempt.
+-- if the task is cancelled, this throws error AB001.
+-- if extend_claim_by is provided, extends the claim on the owner_run by that many seconds.
 create function durable.set_task_checkpoint_state (
   p_queue_name text,
   p_task_id uuid,
   p_step_name text,
   p_state jsonb,
   p_owner_run uuid,
-  p_extend_claim_by integer default null
+  p_extend_claim_by integer default null -- seconds
 )
   returns void
   language plpgsql
@@ -872,6 +897,7 @@ begin
     raise exception 'step_name must be provided';
   end if;
 
+  -- get the current attempt number and task state
   execute format(
     'select r.attempt, t.state
        from durable.%I r
@@ -887,6 +913,7 @@ begin
     raise exception 'Run "%" not found for checkpoint', p_owner_run;
   end if;
 
+  -- if the task was cancelled raise a special error the caller can catch to terminate
   if v_task_state = 'cancelled' then
     raise exception sqlstate 'AB001' using message = 'Task has been cancelled';
   end if;
