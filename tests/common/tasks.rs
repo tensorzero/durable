@@ -5,13 +5,16 @@ use serde::{Deserialize, Serialize};
 // ResearchTask - Example from README demonstrating multi-step checkpointing
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct ResearchTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResearchParams {
     pub query: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResearchResult {
     pub summary: String,
@@ -60,8 +63,10 @@ impl Task for ResearchTask {
 // EchoTask - Simple task that returns input
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct EchoTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EchoParams {
     pub message: String,
@@ -82,8 +87,10 @@ impl Task for EchoTask {
 // FailingTask - Task that always fails
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct FailingTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailingParams {
     pub error_message: String,
@@ -107,8 +114,10 @@ impl Task for FailingTask {
 // MultiStepTask - Task with multiple checkpointed steps
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct MultiStepTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiStepOutput {
     pub step1: i32,
@@ -138,8 +147,10 @@ impl Task for MultiStepTask {
 // SleepingTask - Task that sleeps for a duration
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct SleepingTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SleepParams {
     pub seconds: u64,
@@ -162,8 +173,10 @@ impl Task for SleepingTask {
 // EventWaitingTask - Task that waits for an event
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct EventWaitingTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventWaitParams {
     pub event_name: String,
@@ -187,6 +200,7 @@ impl Task for EventWaitingTask {
 // CountingParams - Parameters for counting retry attempts
 // ============================================================================
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CountingParams {
     pub fail_until_attempt: u32,
@@ -196,14 +210,17 @@ pub struct CountingParams {
 // StepCountingTask - Tracks how many times each step executes
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct StepCountingTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StepCountingParams {
     /// If true, fail after step2
     pub fail_after_step2: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StepCountingOutput {
     pub step1_value: String,
@@ -249,6 +266,7 @@ impl Task for StepCountingTask {
 // EmptyParamsTask - Task with empty params (edge case)
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct EmptyParamsTask;
 
 #[async_trait]
@@ -266,8 +284,10 @@ impl Task for EmptyParamsTask {
 // HeartbeatTask - Task that uses heartbeat for long operations
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct HeartbeatTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatParams {
     pub iterations: u32,
@@ -294,8 +314,10 @@ impl Task for HeartbeatTask {
 // ConvenienceMethodsTask - Task that uses rand(), now(), and uuid7()
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct ConvenienceMethodsTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConvenienceMethodsOutput {
     pub rand_value: f64,
@@ -326,8 +348,10 @@ impl Task for ConvenienceMethodsTask {
 // MultipleConvenienceCallsTask - Tests multiple calls produce different values
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct MultipleConvenienceCallsTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultipleCallsOutput {
     pub rand1: f64,
@@ -361,6 +385,7 @@ impl Task for MultipleConvenienceCallsTask {
 // ReservedPrefixTask - Tests that $ prefix is rejected
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct ReservedPrefixTask;
 
 #[async_trait]
@@ -383,8 +408,10 @@ impl Task for ReservedPrefixTask {
 // ============================================================================
 
 /// Simple child task that doubles a number
+#[allow(dead_code)]
 pub struct DoubleTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoubleParams {
     pub value: i32,
@@ -402,6 +429,7 @@ impl Task for DoubleTask {
 }
 
 /// Child task that always fails
+#[allow(dead_code)]
 pub struct FailingChildTask;
 
 #[async_trait]
@@ -422,13 +450,16 @@ impl Task for FailingChildTask {
 // ============================================================================
 
 /// Parent task that spawns a single child and joins it
+#[allow(dead_code)]
 pub struct SingleSpawnTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleSpawnParams {
     pub child_value: i32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleSpawnOutput {
     pub child_result: i32,
@@ -460,13 +491,16 @@ impl Task for SingleSpawnTask {
 }
 
 /// Parent task that spawns multiple children and joins them
+#[allow(dead_code)]
 pub struct MultiSpawnTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiSpawnParams {
     pub values: Vec<i32>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiSpawnOutput {
     pub results: Vec<i32>,
@@ -504,6 +538,7 @@ impl Task for MultiSpawnTask {
 }
 
 /// Parent task that spawns a failing child
+#[allow(dead_code)]
 pub struct SpawnFailingChildTask;
 
 #[async_trait]
@@ -534,8 +569,10 @@ impl Task for SpawnFailingChildTask {
 // LongRunningHeartbeatTask - Task that runs longer than claim_timeout but heartbeats
 // ============================================================================
 
+#[allow(dead_code)]
 pub struct LongRunningHeartbeatTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LongRunningHeartbeatParams {
     /// Total time to run in milliseconds
@@ -565,8 +602,10 @@ impl Task for LongRunningHeartbeatTask {
 }
 
 /// Slow child task (for testing cancellation)
+#[allow(dead_code)]
 pub struct SlowChildTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlowChildParams {
     pub sleep_ms: u64,
@@ -585,8 +624,10 @@ impl Task for SlowChildTask {
 }
 
 /// Parent task that spawns a slow child (for testing cancellation)
+#[allow(dead_code)]
 pub struct SpawnSlowChildTask;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnSlowChildParams {
     pub child_sleep_ms: u64,

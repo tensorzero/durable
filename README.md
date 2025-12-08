@@ -230,6 +230,33 @@ client.emit_event(
 ).await?;
 ```
 
+### Transactional Spawning
+
+You can atomically enqueue a task as part of a larger database transaction. This ensures that either both your write and the task spawn succeed, or neither does:
+
+```rust
+let mut tx = client.pool().begin().await?;
+
+// Your application write
+sqlx::query("INSERT INTO orders (id, status) VALUES ($1, $2)")
+    .bind(order_id)
+    .bind("pending")
+    .execute(&mut *tx)
+    .await?;
+
+// Enqueue task in the same transaction
+client.spawn_with::<ProcessOrder, _>(&mut *tx, ProcessOrderParams { order_id }).await?;
+
+tx.commit().await?;
+// Both succeed or both fail - atomic
+```
+
+This is useful when you need to guarantee that a task is only enqueued if related data was successfully persisted. The `_with` variants accept any SQLx executor:
+
+- `spawn_with(executor, params)` - Spawn with default options
+- `spawn_with_options_with(executor, params, options)` - Spawn with custom options
+- `spawn_by_name_with(executor, task_name, params, options)` - Dynamic spawn by name
+
 ## API Overview
 
 ### Client

@@ -402,3 +402,116 @@ async fn test_client_default_max_attempts(pool: PgPool) -> sqlx::Result<()> {
 
     Ok(())
 }
+
+// ============================================================================
+// Transactional Spawn Tests
+// ============================================================================
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_spawn_with_transaction_commit(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "spawn_tx_commit").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<EchoTask>().await;
+
+    // Create a test table
+    sqlx::query("CREATE TABLE test_orders (id UUID PRIMARY KEY, status TEXT)")
+        .execute(&pool)
+        .await?;
+
+    let order_id = uuid::Uuid::now_v7();
+
+    // Start a transaction and do both operations
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("INSERT INTO test_orders (id, status) VALUES ($1, $2)")
+        .bind(order_id)
+        .bind("pending")
+        .execute(&mut *tx)
+        .await?;
+
+    let result = client
+        .spawn_with::<EchoTask, _>(
+            &mut *tx,
+            EchoParams {
+                message: format!("process order {}", order_id),
+            },
+        )
+        .await
+        .expect("Failed to spawn task in transaction");
+
+    tx.commit().await?;
+
+    // Verify both the order and task exist
+    let order_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM test_orders WHERE id = $1)")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await?;
+    assert!(order_exists, "Order should exist after commit");
+
+    let task_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM durable.t_spawn_tx_commit WHERE task_id = $1)",
+    )
+    .bind(result.task_id)
+    .fetch_one(&pool)
+    .await?;
+    assert!(task_exists, "Task should exist after commit");
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_spawn_with_transaction_rollback(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "spawn_tx_rollback").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<EchoTask>().await;
+
+    // Create a test table
+    sqlx::query("CREATE TABLE test_orders_rb (id UUID PRIMARY KEY, status TEXT)")
+        .execute(&pool)
+        .await?;
+
+    let order_id = uuid::Uuid::now_v7();
+
+    // Start a transaction and do both operations, then rollback
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("INSERT INTO test_orders_rb (id, status) VALUES ($1, $2)")
+        .bind(order_id)
+        .bind("pending")
+        .execute(&mut *tx)
+        .await?;
+
+    let result = client
+        .spawn_with::<EchoTask, _>(
+            &mut *tx,
+            EchoParams {
+                message: format!("process order {}", order_id),
+            },
+        )
+        .await
+        .expect("Failed to spawn task in transaction");
+
+    let task_id = result.task_id;
+
+    // Rollback instead of commit
+    tx.rollback().await?;
+
+    // Verify neither the order nor task exist
+    let order_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM test_orders_rb WHERE id = $1)")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await?;
+    assert!(!order_exists, "Order should NOT exist after rollback");
+
+    let task_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM durable.t_spawn_tx_rollback WHERE task_id = $1)",
+    )
+    .bind(task_id)
+    .fetch_one(&pool)
+    .await?;
+    assert!(!task_exists, "Task should NOT exist after rollback");
+
+    Ok(())
+}

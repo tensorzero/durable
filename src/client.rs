@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use sqlx::PgPool;
+use sqlx::{Executor, PgPool, Postgres};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -212,6 +212,67 @@ impl Durable {
         params: JsonValue,
         options: SpawnOptions,
     ) -> anyhow::Result<SpawnResult> {
+        self.spawn_by_name_with(&self.pool, task_name, params, options)
+            .await
+    }
+
+    /// Spawn a task with a custom executor (e.g., a transaction).
+    ///
+    /// This allows you to atomically enqueue a task as part of a larger transaction.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut tx = client.pool().begin().await?;
+    ///
+    /// sqlx::query("INSERT INTO orders (id) VALUES ($1)")
+    ///     .bind(order_id)
+    ///     .execute(&mut *tx)
+    ///     .await?;
+    ///
+    /// client.spawn_with::<ProcessOrder, _>(&mut *tx, params).await?;
+    ///
+    /// tx.commit().await?;
+    /// ```
+    pub async fn spawn_with<'e, T, E>(
+        &self,
+        executor: E,
+        params: T::Params,
+    ) -> anyhow::Result<SpawnResult>
+    where
+        T: Task,
+        E: Executor<'e, Database = Postgres>,
+    {
+        self.spawn_with_options_with::<T, E>(executor, params, SpawnOptions::default())
+            .await
+    }
+
+    /// Spawn a task with options using a custom executor.
+    pub async fn spawn_with_options_with<'e, T, E>(
+        &self,
+        executor: E,
+        params: T::Params,
+        options: SpawnOptions,
+    ) -> anyhow::Result<SpawnResult>
+    where
+        T: Task,
+        E: Executor<'e, Database = Postgres>,
+    {
+        self.spawn_by_name_with(executor, T::NAME, serde_json::to_value(&params)?, options)
+            .await
+    }
+
+    /// Spawn a task by name using a custom executor.
+    pub async fn spawn_by_name_with<'e, E>(
+        &self,
+        executor: E,
+        task_name: &str,
+        params: JsonValue,
+        options: SpawnOptions,
+    ) -> anyhow::Result<SpawnResult>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
         let queue = options.queue.as_deref().unwrap_or(&self.queue_name);
         let max_attempts = options.max_attempts.unwrap_or(self.default_max_attempts);
 
@@ -225,7 +286,7 @@ impl Durable {
             .bind(task_name)
             .bind(&params)
             .bind(&db_options)
-            .fetch_one(&self.pool)
+            .fetch_one(executor)
             .await?;
 
         Ok(SpawnResult {
