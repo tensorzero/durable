@@ -84,6 +84,12 @@ begin
     't_' || p_queue_name
   );
 
+  execute format('comment on column durable.%I.params is %L', 't_' || p_queue_name, 'User-defined. Task input parameters. Schema depends on Task::Params type.');
+  execute format('comment on column durable.%I.headers is %L', 't_' || p_queue_name, 'User-defined. Optional key-value metadata as {"key": <any JSON value>}.');
+  execute format('comment on column durable.%I.retry_strategy is %L', 't_' || p_queue_name, '{"kind": "none"} | {"kind": "fixed", "base_seconds": <u64>} | {"kind": "exponential", "base_seconds": <u64>, "factor": <f64>, "max_seconds": <u64>}');
+  execute format('comment on column durable.%I.cancellation is %L', 't_' || p_queue_name, '{"max_delay": <seconds>, "max_duration": <seconds>} - both optional. max_delay: cancel if not started within N seconds of enqueue. max_duration: cancel if not completed within N seconds of first start.');
+  execute format('comment on column durable.%I.completed_payload is %L', 't_' || p_queue_name, 'User-defined. Task return value. Schema depends on Task::Output type.');
+
   execute format(
     'create table if not exists durable.%I (
         run_id uuid primary key,
@@ -105,6 +111,10 @@ begin
     'r_' || p_queue_name
   );
 
+  execute format('comment on column durable.%I.event_payload is %L', 'r_' || p_queue_name, 'User-defined. Payload from the event that woke this run, if any.');
+  execute format('comment on column durable.%I.result is %L', 'r_' || p_queue_name, 'User-defined. Serialized task output. Schema depends on Task::Output type.');
+  execute format('comment on column durable.%I.failure_reason is %L', 'r_' || p_queue_name, '{"name": "<error type>", "message": "<string>", "backtrace": "<string>"}');
+
   execute format(
     'create table if not exists durable.%I (
         task_id uuid not null,
@@ -118,6 +128,8 @@ begin
     'c_' || p_queue_name
   );
 
+  execute format('comment on column durable.%I.state is %L', 'c_' || p_queue_name, 'User-defined. Checkpoint value from ctx.step(). Any JSON-serializable value.');
+
   execute format(
     'create table if not exists durable.%I (
         event_name text primary key,
@@ -126,6 +138,8 @@ begin
      )',
     'e_' || p_queue_name
   );
+
+  execute format('comment on column durable.%I.payload is %L', 'e_' || p_queue_name, 'User-defined. Event payload. Internal child events use: {"status": "completed"|"failed"|"cancelled", "result"?: <json>, "error"?: <json>}');
 
   execute format(
     'create table if not exists durable.%I (
