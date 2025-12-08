@@ -214,7 +214,6 @@ pub struct SpawnResult {
 pub struct CheckpointRow {
     pub checkpoint_name: String,
     pub state: JsonValue,
-    pub status: String,
     pub owner_run_id: Uuid,
     pub updated_at: DateTime<Utc>,
 }

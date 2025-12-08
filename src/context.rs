@@ -81,12 +81,11 @@ impl TaskContext {
     ) -> Result<Self, sqlx::Error> {
         // Load all checkpoints for this task into cache
         let checkpoints: Vec<CheckpointRow> = sqlx::query_as(
-            "SELECT checkpoint_name, state, status, owner_run_id, updated_at
-             FROM durable.get_task_checkpoint_states($1, $2, $3)",
+            "SELECT checkpoint_name, state, owner_run_id, updated_at
+             FROM durable.get_task_checkpoint_states($1, $2)",
         )
         .bind(&queue_name)
         .bind(task.task_id)
-        .bind(task.run_id)
         .fetch_all(&pool)
         .await?;
 

@@ -111,7 +111,8 @@ begin
     'r_' || p_queue_name
   );
 
-  execute format('comment on column durable.%I.event_payload is %L', 'r_' || p_queue_name, 'User-defined. Payload from the event that woke this run, if any.');
+  execute format('comment on column durable.%I.wake_event is %L', 'r_' || p_queue_name, 'Event name this run is waiting for while sleeping. Set by await_event when suspending, cleared when the event fires or timeout expires.');
+  execute format('comment on column durable.%I.event_payload is %L', 'r_' || p_queue_name, 'Payload delivered by emit_event when waking this run. Consumed by await_event on the next claim to return the value to the caller.');
   execute format('comment on column durable.%I.result is %L', 'r_' || p_queue_name, 'User-defined. Serialized task output. Schema depends on Task::Output type.');
   execute format('comment on column durable.%I.failure_reason is %L', 'r_' || p_queue_name, '{"name": "<error type>", "message": "<string>", "backtrace": "<string>"}');
 
@@ -120,7 +121,6 @@ begin
         task_id uuid not null,
         checkpoint_name text not null,
         state jsonb,
-        status text not null default ''committed'',
         owner_run_id uuid,
         updated_at timestamptz not null default durable.current_time(),
         primary key (task_id, checkpoint_name)
@@ -463,7 +463,7 @@ begin
      -- clean up any wait registrations that timed out
      -- that are subsumed by the claim
      -- e.g. a wait times out so the run becomes available and now
-     -- it is claimed but we don't want this wait to linger in DB
+     -- it is claimed but we do not want this wait to linger in DB
      wait_cleanup as (
         delete from durable.%3$I w
          using updated u
@@ -480,9 +480,9 @@ begin
        t.params,
        t.retry_strategy,
        t.max_attempts,
-      t.headers,
-      r.wake_event,
-      r.event_payload
+       t.headers,
+       r.wake_event,
+       r.event_payload
      from updated u
      join durable.%1$I r on r.run_id = u.run_id
      join durable.%2$I t on t.task_id = u.task_id
@@ -604,8 +604,8 @@ begin
   else
     v_wake_at := v_now + (p_duration_ms || ' milliseconds')::interval;
     execute format(
-      'insert into durable.%I (task_id, checkpoint_name, state, status, owner_run_id, updated_at)
-       values ($1, $2, $3, ''committed'', $4, $5)',
+      'insert into durable.%I (task_id, checkpoint_name, state, owner_run_id, updated_at)
+       values ($1, $2, $3, $4, $5)',
       'c_' || p_queue_name
     ) using v_task_id, p_checkpoint_name, to_jsonb(v_wake_at::text), p_run_id, v_now;
   end if;
@@ -946,11 +946,10 @@ begin
 
   if v_existing_owner is null or v_existing_attempt is null or v_new_attempt >= v_existing_attempt then
     execute format(
-      'insert into durable.%I (task_id, checkpoint_name, state, status, owner_run_id, updated_at)
-       values ($1, $2, $3, ''committed'', $4, $5)
+      'insert into durable.%I (task_id, checkpoint_name, state, owner_run_id, updated_at)
+       values ($1, $2, $3, $4, $5)
        on conflict (task_id, checkpoint_name)
        do update set state = excluded.state,
-                     status = excluded.status,
                      owner_run_id = excluded.owner_run_id,
                      updated_at = excluded.updated_at',
       'c_' || p_queue_name
@@ -959,6 +958,7 @@ begin
 end;
 $$;
 
+-- extends the claim on a run by that many seconds
 create function durable.extend_claim (
   p_queue_name text,
   p_run_id uuid,
@@ -1004,13 +1004,11 @@ $$;
 create function durable.get_task_checkpoint_state (
   p_queue_name text,
   p_task_id uuid,
-  p_step_name text,
-  p_include_pending boolean default false
+  p_step_name text
 )
   returns table (
     checkpoint_name text,
     state jsonb,
-    status text,
     owner_run_id uuid,
     updated_at timestamptz
   )
@@ -1018,7 +1016,7 @@ create function durable.get_task_checkpoint_state (
 as $$
 begin
   return query execute format(
-    'select checkpoint_name, state, status, owner_run_id, updated_at
+    'select checkpoint_name, state, owner_run_id, updated_at
        from durable.%I
       where task_id = $1
         and checkpoint_name = $2',
@@ -1029,13 +1027,11 @@ $$;
 
 create function durable.get_task_checkpoint_states (
   p_queue_name text,
-  p_task_id uuid,
-  p_run_id uuid
+  p_task_id uuid
 )
   returns table (
     checkpoint_name text,
     state jsonb,
-    status text,
     owner_run_id uuid,
     updated_at timestamptz
   )
@@ -1043,7 +1039,7 @@ create function durable.get_task_checkpoint_states (
 as $$
 begin
   return query execute format(
-    'select checkpoint_name, state, status, owner_run_id, updated_at
+    'select checkpoint_name, state, owner_run_id, updated_at
        from durable.%I
       where task_id = $1
       order by updated_at asc',
@@ -1052,13 +1048,17 @@ begin
 end;
 $$;
 
+-- awaits an event for a given task's run and step name.
+-- this will immediately return if it the event has already returned
+-- it will also time out if the event has taken too long
+-- if a timeout is set it will return without a payload after that much time
 create function durable.await_event (
   p_queue_name text,
   p_task_id uuid,
   p_run_id uuid,
   p_step_name text,
   p_event_name text,
-  p_timeout integer default null
+  p_timeout integer default null -- seconds
 )
   returns table (
     should_suspend boolean,
@@ -1091,6 +1091,7 @@ begin
 
   v_available_at := coalesce(v_timeout_at, 'infinity'::timestamptz);
 
+  -- if there is already a checkpoint for this step just use it
   execute format(
     'select state
        from durable.%I
@@ -1106,6 +1107,7 @@ begin
     return;
   end if;
 
+  -- let's get the run state, any existing event payload and wake event name
   execute format(
     'select r.state, r.event_payload, r.wake_event, t.state
        from durable.%I r
@@ -1156,13 +1158,13 @@ begin
     v_resolved_payload := v_event_payload;
   end if;
 
+  -- last write wins if there is an existing checkpoint with this name for this task
   if v_resolved_payload is not null then
     execute format(
-      'insert into durable.%I (task_id, checkpoint_name, state, status, owner_run_id, updated_at)
-       values ($1, $2, $3, ''committed'', $4, $5)
+      'insert into durable.%I (task_id, checkpoint_name, state, owner_run_id, updated_at)
+       values ($1, $2, $3, $4, $5)
        on conflict (task_id, checkpoint_name)
        do update set state = excluded.state,
-                     status = excluded.status,
                      owner_run_id = excluded.owner_run_id,
                      updated_at = excluded.updated_at',
       'c_' || p_queue_name
@@ -1174,6 +1176,7 @@ begin
   -- Detect if we resumed due to timeout: wake_event matches and payload is null
   if v_resolved_payload is null and v_wake_event = p_event_name and v_existing_payload is null then
     -- Resumed due to timeout; don't re-sleep and don't create a new wait
+    -- unset the wake event before returning
     execute format(
       'update durable.%I set wake_event = null where run_id = $1',
       'r_' || p_queue_name
@@ -1182,6 +1185,7 @@ begin
     return;
   end if;
 
+  -- otherwise we must set up a waiter
   execute format(
     'insert into durable.%I (task_id, run_id, step_name, event_name, timeout_at, created_at)
      values ($1, $2, $3, $4, $5, $6)
@@ -1216,6 +1220,7 @@ begin
 end;
 $$;
 
+-- emit an event and wake up waiters
 create function durable.emit_event (
   p_queue_name text,
   p_event_name text,
@@ -1232,6 +1237,7 @@ begin
     raise exception 'event_name must be provided';
   end if;
 
+  -- insert the event into the events table
   execute format(
     'insert into durable.%I (event_name, payload, emitted_at)
      values ($1, $2, $3)
@@ -1255,6 +1261,7 @@ begin
          where event_name = $1
            and (timeout_at is null or timeout_at > $2)
      ),
+     -- update the run table for all waiting runs so they are pending again
      updated_runs as (
         update durable.%2$I r
            set state = ''pending'',
@@ -1267,23 +1274,25 @@ begin
            and r.state = ''sleeping''
          returning r.run_id, r.task_id
      ),
+     -- update checkpoints for all affected tasks/steps so they contain the event payload
      checkpoint_upd as (
-        insert into durable.%3$I (task_id, checkpoint_name, state, status, owner_run_id, updated_at)
-        select a.task_id, a.step_name, $3, ''committed'', a.run_id, $2
+        insert into durable.%3$I (task_id, checkpoint_name, state, owner_run_id, updated_at)
+        select a.task_id, a.step_name, $3, a.run_id, $2
           from affected a
           join updated_runs ur on ur.run_id = a.run_id
         on conflict (task_id, checkpoint_name)
         do update set state = excluded.state,
-                      status = excluded.status,
                       owner_run_id = excluded.owner_run_id,
                       updated_at = excluded.updated_at
      ),
+     -- update the task table to set to pending
      updated_tasks as (
         update durable.%4$I t
            set state = ''pending''
          where t.task_id in (select task_id from updated_runs)
          returning task_id
      )
+     -- delete the wait registrations that were satisfied
      delete from durable.%5$I w
       where w.event_name = $1
         and w.run_id in (select run_id from updated_runs)',
