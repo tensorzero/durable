@@ -1,5 +1,7 @@
 use durable::{SpawnOptions, Task, TaskContext, TaskError, TaskHandle, TaskResult, async_trait};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 // ============================================================================
 // ResearchTask - Example from README demonstrating multi-step checkpointing
@@ -654,5 +656,475 @@ impl Task for SpawnSlowChildTask {
         // Join (this will wait for the slow child)
         let result = ctx.join("slow-child", handle).await?;
         Ok(result)
+    }
+}
+
+// ============================================================================
+// EventEmitterTask - Task that emits an event then completes
+// ============================================================================
+
+#[allow(dead_code)]
+pub struct EventEmitterTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventEmitterParams {
+    pub event_name: String,
+    pub payload: serde_json::Value,
+}
+
+#[async_trait]
+impl Task for EventEmitterTask {
+    const NAME: &'static str = "event-emitter";
+    type Params = EventEmitterParams;
+    type Output = String;
+
+    async fn run(params: Self::Params, ctx: TaskContext) -> TaskResult<Self::Output> {
+        ctx.emit_event(&params.event_name, &params.payload).await?;
+        Ok("emitted".to_string())
+    }
+}
+
+// ============================================================================
+// ManyStepsTask - Task with configurable number of steps
+// ============================================================================
+
+#[allow(dead_code)]
+pub struct ManyStepsTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManyStepsParams {
+    pub num_steps: u32,
+}
+
+#[async_trait]
+impl Task for ManyStepsTask {
+    const NAME: &'static str = "many-steps";
+    type Params = ManyStepsParams;
+    type Output = u32;
+
+    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        for i in 0..params.num_steps {
+            let _: u32 = ctx
+                .step(&format!("step-{i}"), || async move { Ok(i) })
+                .await?;
+        }
+        Ok(params.num_steps)
+    }
+}
+
+// ============================================================================
+// LargePayloadTask - Task that returns a large payload
+// ============================================================================
+
+#[allow(dead_code)]
+pub struct LargePayloadTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LargePayloadParams {
+    /// Size of the payload in bytes (approximately)
+    pub size_bytes: usize,
+}
+
+#[async_trait]
+impl Task for LargePayloadTask {
+    const NAME: &'static str = "large-payload";
+    type Params = LargePayloadParams;
+    type Output = String;
+
+    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        // Create a large string of repeated characters
+        let payload: String = ctx
+            .step(
+                "generate",
+                || async move { Ok("x".repeat(params.size_bytes)) },
+            )
+            .await?;
+        Ok(payload)
+    }
+}
+
+// ============================================================================
+// CpuBoundTask - Task that busy-loops without yielding (can't heartbeat)
+// ============================================================================
+
+#[allow(dead_code)]
+pub struct CpuBoundTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CpuBoundParams {
+    /// Duration to busy-loop in milliseconds
+    pub duration_ms: u64,
+}
+
+#[async_trait]
+impl Task for CpuBoundTask {
+    const NAME: &'static str = "cpu-bound";
+    type Params = CpuBoundParams;
+    type Output = String;
+
+    async fn run(params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+        let start = std::time::Instant::now();
+        let duration = std::time::Duration::from_millis(params.duration_ms);
+
+        // Busy loop - no yielding, no heartbeat possible
+        while start.elapsed() < duration {
+            // Spin - this prevents any async yielding
+            std::hint::spin_loop();
+        }
+
+        Ok("done".to_string())
+    }
+}
+
+// ============================================================================
+// SlowNoHeartbeatTask - Async task that sleeps longer than lease without heartbeat
+// ============================================================================
+
+#[allow(dead_code)]
+pub struct SlowNoHeartbeatTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlowNoHeartbeatParams {
+    /// Duration to sleep in milliseconds (should be > claim_timeout)
+    pub sleep_ms: u64,
+}
+
+#[async_trait]
+impl Task for SlowNoHeartbeatTask {
+    const NAME: &'static str = "slow-no-heartbeat";
+    type Params = SlowNoHeartbeatParams;
+    type Output = String;
+
+    async fn run(params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+        // Just sleep - no heartbeat calls
+        tokio::time::sleep(std::time::Duration::from_millis(params.sleep_ms)).await;
+        Ok("done".to_string())
+    }
+}
+
+// ============================================================================
+// CheckpointReplayTask - Tracks execution count via external counter
+// ============================================================================
+
+/// Shared state for tracking task execution across retries.
+/// Use Arc<ExecutionTracker> and pass to task via thread-local or similar mechanism.
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct ExecutionTracker {
+    pub step1_count: AtomicU32,
+    pub step2_count: AtomicU32,
+    pub step3_count: AtomicU32,
+    pub should_fail_after_step2: AtomicBool,
+}
+
+impl ExecutionTracker {
+    #[allow(dead_code)]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    #[allow(dead_code)]
+    pub fn reset(&self) {
+        self.step1_count.store(0, Ordering::SeqCst);
+        self.step2_count.store(0, Ordering::SeqCst);
+        self.step3_count.store(0, Ordering::SeqCst);
+        self.should_fail_after_step2.store(false, Ordering::SeqCst);
+    }
+}
+
+// Thread-local storage for execution tracker
+thread_local! {
+    static EXECUTION_TRACKER: std::cell::RefCell<Option<Arc<ExecutionTracker>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[allow(dead_code)]
+pub fn set_execution_tracker(tracker: Arc<ExecutionTracker>) {
+    EXECUTION_TRACKER.with(|t| {
+        *t.borrow_mut() = Some(tracker);
+    });
+}
+
+#[allow(dead_code)]
+pub fn get_execution_tracker() -> Option<Arc<ExecutionTracker>> {
+    EXECUTION_TRACKER.with(|t| t.borrow().clone())
+}
+
+#[allow(dead_code)]
+pub struct CheckpointReplayTask;
+
+#[async_trait]
+impl Task for CheckpointReplayTask {
+    const NAME: &'static str = "checkpoint-replay";
+    type Params = ();
+    type Output = String;
+
+    async fn run(_params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        let tracker = get_execution_tracker();
+
+        // Step 1 - increment counter every time closure actually runs
+        let _: String = ctx
+            .step("step1", || async {
+                if let Some(ref t) = tracker {
+                    t.step1_count.fetch_add(1, Ordering::SeqCst);
+                }
+                Ok("step1_result".to_string())
+            })
+            .await?;
+
+        // Step 2 - increment counter
+        let _: String = ctx
+            .step("step2", || async {
+                if let Some(ref t) = tracker {
+                    t.step2_count.fetch_add(1, Ordering::SeqCst);
+                }
+                Ok("step2_result".to_string())
+            })
+            .await?;
+
+        // Check if we should fail
+        if let Some(ref t) = tracker
+            && t.should_fail_after_step2.load(Ordering::SeqCst)
+        {
+            return Err(TaskError::Failed(anyhow::anyhow!(
+                "Intentional failure after step2"
+            )));
+        }
+
+        // Step 3 - increment counter
+        let _: String = ctx
+            .step("step3", || async {
+                if let Some(ref t) = tracker {
+                    t.step3_count.fetch_add(1, Ordering::SeqCst);
+                }
+                Ok("step3_result".to_string())
+            })
+            .await?;
+
+        Ok("completed".to_string())
+    }
+}
+
+// ============================================================================
+// DeterministicReplayTask - Verifies rand/now/uuid7 are deterministic on retry
+// ============================================================================
+
+#[allow(dead_code)]
+pub struct DeterministicReplayTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeterministicReplayParams {
+    pub fail_on_first_attempt: bool,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeterministicReplayOutput {
+    pub rand_value: f64,
+    pub now_value: String,
+    pub uuid_value: uuid::Uuid,
+}
+
+// Track whether we've already failed once
+thread_local! {
+    static DETERMINISTIC_TASK_FAILED: std::cell::RefCell<bool> = const { std::cell::RefCell::new(false) };
+}
+
+#[allow(dead_code)]
+pub fn reset_deterministic_task_state() {
+    DETERMINISTIC_TASK_FAILED.with(|f| *f.borrow_mut() = false);
+}
+
+#[async_trait]
+impl Task for DeterministicReplayTask {
+    const NAME: &'static str = "deterministic-replay";
+    type Params = DeterministicReplayParams;
+    type Output = DeterministicReplayOutput;
+
+    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        let rand_value = ctx.rand().await?;
+        let now_value = ctx.now().await?;
+        let uuid_value = ctx.uuid7().await?;
+
+        // Fail on first attempt if requested
+        if params.fail_on_first_attempt {
+            let should_fail = DETERMINISTIC_TASK_FAILED.with(|f| {
+                let already_failed = *f.borrow();
+                if !already_failed {
+                    *f.borrow_mut() = true;
+                    true
+                } else {
+                    false
+                }
+            });
+
+            if should_fail {
+                return Err(TaskError::Failed(anyhow::anyhow!("First attempt failure")));
+            }
+        }
+
+        Ok(DeterministicReplayOutput {
+            rand_value,
+            now_value: now_value.to_rfc3339(),
+            uuid_value,
+        })
+    }
+}
+
+// ============================================================================
+// EventThenFailTask - Task that receives event then fails on first attempt
+// ============================================================================
+
+thread_local! {
+    static EVENT_THEN_FAIL_FAILED: std::cell::RefCell<bool> = const { std::cell::RefCell::new(false) };
+}
+
+#[allow(dead_code)]
+pub fn reset_event_then_fail_state() {
+    EVENT_THEN_FAIL_FAILED.with(|f| *f.borrow_mut() = false);
+}
+
+#[allow(dead_code)]
+pub struct EventThenFailTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventThenFailParams {
+    pub event_name: String,
+}
+
+#[async_trait]
+impl Task for EventThenFailTask {
+    const NAME: &'static str = "event-then-fail";
+    type Params = EventThenFailParams;
+    type Output = serde_json::Value;
+
+    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        // Wait for event (will be checkpointed)
+        let payload: serde_json::Value = ctx.await_event(&params.event_name, None).await?;
+
+        // Fail on first attempt to test checkpoint preservation
+        let should_fail = EVENT_THEN_FAIL_FAILED.with(|f| {
+            let already_failed = *f.borrow();
+            if !already_failed {
+                *f.borrow_mut() = true;
+                true
+            } else {
+                false
+            }
+        });
+
+        if should_fail {
+            return Err(TaskError::Failed(anyhow::anyhow!(
+                "First attempt failure after event"
+            )));
+        }
+
+        // Second attempt succeeds with the same payload (from checkpoint)
+        Ok(payload)
+    }
+}
+
+// ============================================================================
+// MultiEventTask - Task that awaits multiple distinct events
+// ============================================================================
+
+#[allow(dead_code)]
+pub struct MultiEventTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiEventParams {
+    pub event1_name: String,
+    pub event2_name: String,
+}
+
+#[async_trait]
+impl Task for MultiEventTask {
+    const NAME: &'static str = "multi-event";
+    type Params = MultiEventParams;
+    type Output = serde_json::Value;
+
+    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        let payload1: serde_json::Value = ctx.await_event(&params.event1_name, None).await?;
+        let payload2: serde_json::Value = ctx.await_event(&params.event2_name, None).await?;
+
+        Ok(serde_json::json!({
+            "event1": payload1,
+            "event2": payload2,
+        }))
+    }
+}
+
+// ============================================================================
+// SpawnThenFailTask - Task that spawns a child then fails on first attempt
+// ============================================================================
+
+thread_local! {
+    static SPAWN_THEN_FAIL_FAILED: std::cell::RefCell<bool> = const { std::cell::RefCell::new(false) };
+}
+
+#[allow(dead_code)]
+pub fn reset_spawn_then_fail_state() {
+    SPAWN_THEN_FAIL_FAILED.with(|f| *f.borrow_mut() = false);
+}
+
+#[allow(dead_code)]
+pub struct SpawnThenFailTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnThenFailParams {
+    pub child_steps: u32,
+}
+
+#[async_trait]
+impl Task for SpawnThenFailTask {
+    const NAME: &'static str = "spawn-then-fail";
+    type Params = SpawnThenFailParams;
+    type Output = serde_json::Value;
+
+    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        use durable::SpawnOptions;
+
+        // Spawn child (should be idempotent)
+        let child_handle = ctx
+            .spawn::<ManyStepsTask>(
+                "child",
+                ManyStepsParams {
+                    num_steps: params.child_steps,
+                },
+                SpawnOptions::default(),
+            )
+            .await?;
+
+        // Fail on first attempt
+        let should_fail = SPAWN_THEN_FAIL_FAILED.with(|f| {
+            let already_failed = *f.borrow();
+            if !already_failed {
+                *f.borrow_mut() = true;
+                true
+            } else {
+                false
+            }
+        });
+
+        if should_fail {
+            return Err(TaskError::Failed(anyhow::anyhow!(
+                "First attempt failure after spawn"
+            )));
+        }
+
+        // Second attempt - join child
+        let child_result: u32 = ctx.join("child", child_handle).await?;
+
+        Ok(serde_json::json!({
+            "child_result": child_result
+        }))
     }
 }
