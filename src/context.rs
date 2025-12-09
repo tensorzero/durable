@@ -297,8 +297,9 @@ impl TaskContext {
     /// Emit an event to this task's queue.
     ///
     /// Events are deduplicated by name - emitting the same event twice
-    /// has no effect (first payload wins). Any tasks waiting for this
-    /// event will be woken up.
+    /// updates the payload (last write wins). Tasks waiting for this event
+    /// are woken with the payload at the time of the write that woke them;
+    /// subsequent writes do not propagate to already-woken tasks.
     pub async fn emit_event<T: Serialize>(&self, event_name: &str, payload: &T) -> TaskResult<()> {
         if event_name.is_empty() {
             return Err(TaskError::Failed(anyhow::anyhow!(

@@ -1031,6 +1031,39 @@ impl Task for EventThenFailTask {
 }
 
 // ============================================================================
+// EventThenDelayTask - Task that receives event then delays before completing
+// ============================================================================
+
+#[allow(dead_code)]
+pub struct EventThenDelayTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventThenDelayParams {
+    pub event_name: String,
+    pub delay_ms: u64,
+}
+
+#[async_trait]
+impl Task for EventThenDelayTask {
+    const NAME: &'static str = "event-then-delay";
+    type Params = EventThenDelayParams;
+    type Output = serde_json::Value;
+
+    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        // Wait for event (will be checkpointed)
+        let payload: serde_json::Value = ctx.await_event(&params.event_name, None).await?;
+
+        // Delay after receiving event - during this time, subsequent writes
+        // to the same event should not affect what we received
+        tokio::time::sleep(std::time::Duration::from_millis(params.delay_ms)).await;
+
+        // Return the payload we received when first woken
+        Ok(payload)
+    }
+}
+
+// ============================================================================
 // MultiEventTask - Task that awaits multiple distinct events
 // ============================================================================
 

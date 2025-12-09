@@ -458,6 +458,79 @@ async fn test_multiple_distinct_events(pool: PgPool) -> sqlx::Result<()> {
     Ok(())
 }
 
+/// Test that subsequent event writes don't propagate to already-woken tasks.
+/// When a task is woken by an event, it receives the payload at wake time;
+/// later writes to the same event don't update what the already-woken task sees.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_event_write_does_not_propagate_after_wake(pool: PgPool) -> sqlx::Result<()> {
+    use common::tasks::{EventThenDelayParams, EventThenDelayTask};
+
+    let client = create_client(pool.clone(), "event_no_propagate").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<EventThenDelayTask>().await;
+
+    // Spawn task that waits for event, then delays before completing
+    let spawn_result = client
+        .spawn::<EventThenDelayTask>(EventThenDelayParams {
+            event_name: "propagate_test".to_string(),
+            delay_ms: 500, // Delay after receiving event
+        })
+        .await
+        .expect("Failed to spawn task");
+
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            ..Default::default()
+        })
+        .await;
+
+    // Wait for task to start waiting for event
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Emit the first event - this wakes the task
+    client
+        .emit_event("propagate_test", &json!({"version": "first"}), None)
+        .await
+        .expect("Failed to emit first event");
+
+    // Wait a bit for the task to wake and start its delay
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Emit a second event with different payload while task is still running
+    client
+        .emit_event("propagate_test", &json!({"version": "second"}), None)
+        .await
+        .expect("Failed to emit second event");
+
+    // Wait for task to complete
+    let terminal = wait_for_task_terminal(
+        &pool,
+        "event_no_propagate",
+        spawn_result.task_id,
+        Duration::from_secs(5),
+    )
+    .await?;
+    worker.shutdown().await;
+
+    assert_eq!(terminal, Some("completed".to_string()));
+
+    // Task should have received the FIRST payload (the one that woke it),
+    // not the second one that was emitted while it was running
+    let query = AssertSqlSafe(
+        "SELECT completed_payload FROM durable.t_event_no_propagate WHERE task_id = $1".to_string(),
+    );
+    let result: (serde_json::Value,) = sqlx::query_as(query)
+        .bind(spawn_result.task_id)
+        .fetch_one(&pool)
+        .await?;
+
+    assert_eq!(result.0, json!({"version": "first"}));
+
+    Ok(())
+}
+
 /// Test that one task can emit an event that another task awaits.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_emit_from_different_task(pool: PgPool) -> sqlx::Result<()> {
