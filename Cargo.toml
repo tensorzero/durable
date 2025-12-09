@@ -26,25 +26,17 @@ rand = "0.9"
 
 # Optional telemetry dependencies
 tracing-opentelemetry = { version = "0.28", optional = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
 opentelemetry = { version = "0.27", optional = true }
-opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"], optional = true }
-opentelemetry-otlp = { version = "0.27", features = ["tonic"], optional = true }
-opentelemetry-semantic-conventions = { version = "0.27", optional = true }
+opentelemetry_sdk = { version = "0.27", optional = true }
 metrics = { version = "0.24", optional = true }
-metrics-exporter-prometheus = { version = "0.16", optional = true }
 
 [features]
 default = []
 telemetry = [
     "dep:tracing-opentelemetry",
-    "dep:tracing-subscriber",
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",
-    "dep:opentelemetry-otlp",
-    "dep:opentelemetry-semantic-conventions",
     "dep:metrics",
-    "dep:metrics-exporter-prometheus",
 ]
 
 [dev-dependencies]
