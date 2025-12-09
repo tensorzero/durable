@@ -244,40 +244,6 @@ async fn test_spawn_with_cancellation_policy(pool: PgPool) -> sqlx::Result<()> {
 }
 
 // ============================================================================
-// Spawn to Different Queue Tests
-// ============================================================================
-
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn test_spawn_to_non_default_queue(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "default_queue").await;
-
-    // Create both queues
-    client.create_queue(None).await.unwrap();
-    client.create_queue(Some("other_queue")).await.unwrap();
-
-    client.register::<EchoTask>().await;
-
-    let options = SpawnOptions {
-        queue: Some("other_queue".to_string()),
-        ..Default::default()
-    };
-
-    let result = client
-        .spawn_with_options::<EchoTask>(
-            EchoParams {
-                message: "test".to_string(),
-            },
-            options,
-        )
-        .await
-        .expect("Failed to spawn task to other queue");
-
-    assert_eq!(result.attempt, 1);
-
-    Ok(())
-}
-
-// ============================================================================
 // Spawn by Name Tests
 // ============================================================================
 

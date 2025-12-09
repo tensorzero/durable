@@ -289,10 +289,8 @@ impl Durable {
             crate::telemetry::inject_trace_context(headers);
         }
 
-        let queue = options.queue.as_deref().unwrap_or(&self.queue_name);
-
         #[cfg(feature = "telemetry")]
-        tracing::Span::current().record("queue", queue);
+        tracing::Span::current().record("queue", &self.queue_name);
 
         let max_attempts = options.max_attempts.unwrap_or(self.default_max_attempts);
 
@@ -302,7 +300,7 @@ impl Durable {
              FROM durable.spawn_task($1, $2, $3, $4)";
 
         let row: SpawnResultRow = sqlx::query_as(query)
-            .bind(queue)
+            .bind(&self.queue_name)
             .bind(task_name)
             .bind(&params)
             .bind(&db_options)
@@ -310,7 +308,7 @@ impl Durable {
             .await?;
 
         #[cfg(feature = "telemetry")]
-        crate::telemetry::record_task_spawned(queue, task_name);
+        crate::telemetry::record_task_spawned(&self.queue_name, task_name);
 
         Ok(SpawnResult {
             task_id: row.task_id,
