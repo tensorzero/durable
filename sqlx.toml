@@ -1,0 +1,6 @@
+[migrate]
+migrations-dir = "src/postgres/migrations"
+table-name = "__durable_sqlx_migrations"  # custom table name to avoid conflicts
+
+[macros.preferred-crates]
+date-time = "chrono"
