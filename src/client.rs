@@ -273,7 +273,6 @@ impl Durable {
     where
         E: Executor<'e, Database = Postgres>,
     {
-        let queue = options.queue.as_deref().unwrap_or(&self.queue_name);
         let max_attempts = options.max_attempts.unwrap_or(self.default_max_attempts);
 
         let db_options = Self::serialize_spawn_options(&options, max_attempts)?;
@@ -282,7 +281,7 @@ impl Durable {
              FROM durable.spawn_task($1, $2, $3, $4)";
 
         let row: SpawnResultRow = sqlx::query_as(query)
-            .bind(queue)
+            .bind(&self.queue_name)
             .bind(task_name)
             .bind(&params)
             .bind(&db_options)

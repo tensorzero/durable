@@ -120,10 +120,6 @@ pub struct SpawnOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub headers: Option<HashMap<String, JsonValue>>,
 
-    /// Override the queue name (not serialized - handled separately)
-    #[serde(skip)]
-    pub queue: Option<String>,
-
     /// Cancellation policy
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancellation: Option<CancellationPolicy>,

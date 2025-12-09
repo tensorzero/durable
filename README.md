@@ -1,6 +1,7 @@
 # durable
 
 A Rust SDK for building durable, fault-tolerant workflows using PostgreSQL.
+This builds off of [absurd](https://github.com/earendil-works/absurd) liberally.
 
 ## Overview
 
