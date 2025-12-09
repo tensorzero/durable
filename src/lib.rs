@@ -61,6 +61,8 @@ mod client;
 mod context;
 mod error;
 mod task;
+#[cfg(feature = "telemetry")]
+pub mod telemetry;
 mod types;
 mod worker;
 

@@ -263,17 +263,37 @@ impl Durable {
     }
 
     /// Spawn a task by name using a custom executor.
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.client.spawn",
+            skip(self, executor, params, options),
+            fields(queue, task_name = %task_name)
+        )
+    )]
+    #[allow(unused_mut)] // mut is needed when telemetry feature is enabled
     pub async fn spawn_by_name_with<'e, E>(
         &self,
         executor: E,
         task_name: &str,
         params: JsonValue,
-        options: SpawnOptions,
+        mut options: SpawnOptions,
     ) -> anyhow::Result<SpawnResult>
     where
         E: Executor<'e, Database = Postgres>,
     {
+        // Inject trace context into headers for distributed tracing
+        #[cfg(feature = "telemetry")]
+        {
+            let headers = options.headers.get_or_insert_with(HashMap::new);
+            crate::telemetry::inject_trace_context(headers);
+        }
+
         let queue = options.queue.as_deref().unwrap_or(&self.queue_name);
+
+        #[cfg(feature = "telemetry")]
+        tracing::Span::current().record("queue", queue);
+
         let max_attempts = options.max_attempts.unwrap_or(self.default_max_attempts);
 
         let db_options = Self::serialize_spawn_options(&options, max_attempts)?;
@@ -288,6 +308,9 @@ impl Durable {
             .bind(&db_options)
             .fetch_one(executor)
             .await?;
+
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::record_task_spawned(queue, task_name);
 
         Ok(SpawnResult {
             task_id: row.task_id,
@@ -336,6 +359,14 @@ impl Durable {
     }
 
     /// Emit an event to a queue (defaults to this client's queue)
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.client.emit_event",
+            skip(self, payload),
+            fields(queue, event_name = %event_name)
+        )
+    )]
     pub async fn emit_event<T: Serialize>(
         &self,
         event_name: &str,
@@ -345,6 +376,10 @@ impl Durable {
         anyhow::ensure!(!event_name.is_empty(), "event_name must be non-empty");
 
         let queue = queue_name.unwrap_or(&self.queue_name);
+
+        #[cfg(feature = "telemetry")]
+        tracing::Span::current().record("queue", queue);
+
         let payload_json = serde_json::to_value(payload)?;
 
         let query = "SELECT durable.emit_event($1, $2, $3)";
@@ -354,6 +389,9 @@ impl Durable {
             .bind(&payload_json)
             .execute(&self.pool)
             .await?;
+
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::record_event_emitted(queue, event_name);
 
         Ok(())
     }
