@@ -487,7 +487,8 @@ impl TaskContext {
     ///
     /// # Arguments
     ///
-    /// * `name` - Unique name for this join operation (used for checkpointing)
+    /// * `name` - Unique name for this join operation (used for checkpointing).
+    ///   Uniqueness is constrained just within this task, not globally or for child tasks.
     /// * `handle` - The [`TaskHandle`] returned by [`spawn`](Self::spawn)
     ///
     /// # Errors
