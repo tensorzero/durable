@@ -41,6 +41,10 @@ telemetry = [
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+tracing-fluent-assertions = "0.3"
+metrics-util = { version = "0.18", features = ["debugging"] }
+tracing-subscriber = { version = "0.3", features = ["registry"] }
+ordered-float = "4"
 
 [[bench]]
 name = "throughput"

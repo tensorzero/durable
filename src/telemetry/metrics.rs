@@ -122,3 +122,237 @@ pub fn record_checkpoint_duration(queue: &str, task_name: &str, duration_secs: f
     histogram!(CHECKPOINT_DURATION, "queue" => queue.to_string(), "task_name" => task_name.to_string())
         .record(duration_secs);
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::*;
+    use metrics::with_local_recorder;
+    use metrics_util::CompositeKey;
+    use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshot};
+    use ordered_float::OrderedFloat;
+
+    fn find_counter(snapshot: Snapshot, name: &str) -> Option<(CompositeKey, u64)> {
+        snapshot
+            .into_vec()
+            .into_iter()
+            .find(|(key, _, _, _)| key.key().name() == name)
+            .map(|(key, _, _, value)| {
+                let count = match value {
+                    DebugValue::Counter(c) => c,
+                    _ => panic!("Expected counter"),
+                };
+                (key, count)
+            })
+    }
+
+    fn find_gauge(snapshot: Snapshot, name: &str) -> Option<(CompositeKey, f64)> {
+        snapshot
+            .into_vec()
+            .into_iter()
+            .find(|(key, _, _, _)| key.key().name() == name)
+            .map(|(key, _, _, value)| {
+                let gauge_value = match value {
+                    DebugValue::Gauge(g) => g.0,
+                    _ => panic!("Expected gauge"),
+                };
+                (key, gauge_value)
+            })
+    }
+
+    fn find_histogram(
+        snapshot: Snapshot,
+        name: &str,
+    ) -> Option<(CompositeKey, Vec<OrderedFloat<f64>>)> {
+        snapshot
+            .into_vec()
+            .into_iter()
+            .find(|(key, _, _, _)| key.key().name() == name)
+            .map(|(key, _, _, value)| {
+                let values = match value {
+                    DebugValue::Histogram(h) => h,
+                    _ => panic!("Expected histogram"),
+                };
+                (key, values)
+            })
+    }
+
+    fn get_label<'a>(key: &'a CompositeKey, label_name: &str) -> Option<&'a str> {
+        key.key()
+            .labels()
+            .find(|l| l.key() == label_name)
+            .map(|l| l.value())
+    }
+
+    #[test]
+    fn test_record_task_spawned() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+
+        with_local_recorder(&recorder, || {
+            record_task_spawned("test_queue", "MyTask");
+        });
+
+        let snapshot = snapshotter.snapshot();
+        let (key, count) = find_counter(snapshot, TASKS_SPAWNED_TOTAL).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(get_label(&key, "queue"), Some("test_queue"));
+        assert_eq!(get_label(&key, "task_name"), Some("MyTask"));
+    }
+
+    #[test]
+    fn test_record_task_claimed() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+
+        with_local_recorder(&recorder, || {
+            record_task_claimed("claim_queue");
+        });
+
+        let snapshot = snapshotter.snapshot();
+        let (key, count) = find_counter(snapshot, TASKS_CLAIMED_TOTAL).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(get_label(&key, "queue"), Some("claim_queue"));
+    }
+
+    #[test]
+    fn test_record_task_completed() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+
+        with_local_recorder(&recorder, || {
+            record_task_completed("complete_queue", "CompletedTask");
+        });
+
+        let snapshot = snapshotter.snapshot();
+        let (key, count) = find_counter(snapshot, TASKS_COMPLETED_TOTAL).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(get_label(&key, "queue"), Some("complete_queue"));
+        assert_eq!(get_label(&key, "task_name"), Some("CompletedTask"));
+    }
+
+    #[test]
+    fn test_record_task_failed() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+
+        with_local_recorder(&recorder, || {
+            record_task_failed("fail_queue", "FailedTask", "timeout");
+        });
+
+        let snapshot = snapshotter.snapshot();
+        let (key, count) = find_counter(snapshot, TASKS_FAILED_TOTAL).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(get_label(&key, "queue"), Some("fail_queue"));
+        assert_eq!(get_label(&key, "task_name"), Some("FailedTask"));
+        assert_eq!(get_label(&key, "error_type"), Some("timeout"));
+    }
+
+    #[test]
+    fn test_record_event_emitted() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+
+        with_local_recorder(&recorder, || {
+            record_event_emitted("event_queue", "user_created");
+        });
+
+        let snapshot = snapshotter.snapshot();
+        let (key, count) = find_counter(snapshot, EVENTS_EMITTED_TOTAL).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(get_label(&key, "queue"), Some("event_queue"));
+        assert_eq!(get_label(&key, "event_name"), Some("user_created"));
+    }
+
+    #[test]
+    fn test_set_worker_concurrent_tasks() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+
+        with_local_recorder(&recorder, || {
+            set_worker_concurrent_tasks("worker_queue", "worker-1", 5);
+        });
+
+        let snapshot = snapshotter.snapshot();
+        let (key, value) = find_gauge(snapshot, WORKER_CONCURRENT_TASKS).unwrap();
+        assert!((value - 5.0).abs() < f64::EPSILON);
+        assert_eq!(get_label(&key, "queue"), Some("worker_queue"));
+        assert_eq!(get_label(&key, "worker_id"), Some("worker-1"));
+    }
+
+    #[test]
+    fn test_set_worker_active() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+
+        with_local_recorder(&recorder, || {
+            set_worker_active("active_queue", "worker-2", true);
+        });
+
+        let snapshot = snapshotter.snapshot();
+        let (key, value) = find_gauge(snapshot, WORKER_ACTIVE).unwrap();
+        assert!((value - 1.0).abs() < f64::EPSILON);
+        assert_eq!(get_label(&key, "queue"), Some("active_queue"));
+        assert_eq!(get_label(&key, "worker_id"), Some("worker-2"));
+
+        with_local_recorder(&recorder, || {
+            set_worker_active("active_queue", "worker-2", false);
+        });
+
+        let snapshot = snapshotter.snapshot();
+        let (_, value) = find_gauge(snapshot, WORKER_ACTIVE).unwrap();
+        assert!(value.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_record_task_execution_duration() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+
+        with_local_recorder(&recorder, || {
+            record_task_execution_duration("exec_queue", "ExecTask", "completed", 1.5);
+        });
+
+        let snapshot = snapshotter.snapshot();
+        let (key, values) = find_histogram(snapshot, TASK_EXECUTION_DURATION).unwrap();
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0], OrderedFloat(1.5));
+        assert_eq!(get_label(&key, "queue"), Some("exec_queue"));
+        assert_eq!(get_label(&key, "task_name"), Some("ExecTask"));
+        assert_eq!(get_label(&key, "outcome"), Some("completed"));
+    }
+
+    #[test]
+    fn test_record_task_claim_duration() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+
+        with_local_recorder(&recorder, || {
+            record_task_claim_duration("claim_dur_queue", 0.25);
+        });
+
+        let snapshot = snapshotter.snapshot();
+        let (key, values) = find_histogram(snapshot, TASK_CLAIM_DURATION).unwrap();
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0], OrderedFloat(0.25));
+        assert_eq!(get_label(&key, "queue"), Some("claim_dur_queue"));
+    }
+
+    #[test]
+    fn test_record_checkpoint_duration() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+
+        with_local_recorder(&recorder, || {
+            record_checkpoint_duration("ckpt_queue", "CkptTask", 0.1);
+        });
+
+        let snapshot = snapshotter.snapshot();
+        let (key, values) = find_histogram(snapshot, CHECKPOINT_DURATION).unwrap();
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0], OrderedFloat(0.1));
+        assert_eq!(get_label(&key, "queue"), Some("ckpt_queue"));
+        assert_eq!(get_label(&key, "task_name"), Some("CkptTask"));
+    }
+}
