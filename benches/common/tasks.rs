@@ -9,12 +9,16 @@ use serde::{Deserialize, Serialize};
 pub struct NoOpTask;
 
 #[async_trait]
-impl Task for NoOpTask {
+impl Task<()> for NoOpTask {
     const NAME: &'static str = "bench-noop";
     type Params = ();
     type Output = ();
 
-    async fn run(_params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        _params: Self::Params,
+        _ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         Ok(())
     }
 }
@@ -33,12 +37,16 @@ pub struct QuickParams {
 }
 
 #[async_trait]
-impl Task for QuickTask {
+impl Task<()> for QuickTask {
     const NAME: &'static str = "bench-quick";
     type Params = QuickParams;
     type Output = u32;
 
-    async fn run(params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        _ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         Ok(params.task_num)
     }
 }
@@ -57,12 +65,16 @@ pub struct MultiStepParams {
 }
 
 #[async_trait]
-impl Task for MultiStepBenchTask {
+impl Task<()> for MultiStepBenchTask {
     const NAME: &'static str = "bench-multi-step";
     type Params = MultiStepParams;
     type Output = u32;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         for i in 0..params.num_steps {
             let _: u32 = ctx
                 .step(&format!("step-{}", i), || async move { Ok(i) })
@@ -86,12 +98,16 @@ pub struct LargePayloadParams {
 }
 
 #[async_trait]
-impl Task for LargePayloadBenchTask {
+impl Task<()> for LargePayloadBenchTask {
     const NAME: &'static str = "bench-large-payload";
     type Params = LargePayloadParams;
     type Output = usize;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         let payload = "x".repeat(params.payload_size);
         let _: String = ctx
             .step("large-step", || async move { Ok(payload) })
