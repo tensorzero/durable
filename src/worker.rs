@@ -53,12 +53,16 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub(crate) async fn start(
+    pub(crate) async fn start<Ctx>(
         pool: PgPool,
         queue_name: String,
-        registry: Arc<RwLock<TaskRegistry>>,
+        registry: Arc<RwLock<TaskRegistry<Ctx>>>,
         options: WorkerOptions,
-    ) -> Self {
+        context: Ctx,
+    ) -> Self
+    where
+        Ctx: Clone + Send + Sync + 'static,
+    {
         let (shutdown_tx, _) = broadcast::channel(1);
         let shutdown_rx = shutdown_tx.subscribe();
 
@@ -79,6 +83,7 @@ impl Worker {
             options,
             worker_id,
             shutdown_rx,
+            context,
         ));
 
         Self {
@@ -96,14 +101,17 @@ impl Worker {
         let _ = self.handle.await;
     }
 
-    async fn run_loop(
+    async fn run_loop<Ctx>(
         pool: PgPool,
         queue_name: String,
-        registry: Arc<RwLock<TaskRegistry>>,
+        registry: Arc<RwLock<TaskRegistry<Ctx>>>,
         options: WorkerOptions,
         worker_id: String,
         mut shutdown_rx: broadcast::Receiver<()>,
-    ) {
+        context: Ctx,
+    ) where
+        Ctx: Clone + Send + Sync + 'static,
+    {
         let concurrency = options.concurrency;
         let batch_size = options.batch_size.unwrap_or(concurrency);
         let claim_timeout = options.claim_timeout;
@@ -165,6 +173,7 @@ impl Worker {
                         let queue_name = queue_name.clone();
                         let registry = registry.clone();
                         let done_tx = done_tx.clone();
+                        let context = context.clone();
 
                         tokio::spawn(async move {
                             Self::execute_task(
@@ -174,6 +183,7 @@ impl Worker {
                                 task,
                                 claim_timeout,
                                 fatal_on_lease_timeout,
+                                context,
                             ).await;
 
                             drop(permit);
@@ -210,14 +220,17 @@ impl Worker {
             .map_err(Into::into)
     }
 
-    async fn execute_task(
+    async fn execute_task<Ctx>(
         pool: PgPool,
         queue_name: String,
-        registry: Arc<RwLock<TaskRegistry>>,
+        registry: Arc<RwLock<TaskRegistry<Ctx>>>,
         task: ClaimedTask,
         claim_timeout: u64,
         fatal_on_lease_timeout: bool,
-    ) {
+        context: Ctx,
+    ) where
+        Ctx: Clone + Send + Sync + 'static,
+    {
         let task_label = format!("{} ({})", task.task_name, task.task_id);
         let task_id = task.task_id;
         let run_id = task.run_id;
@@ -266,7 +279,7 @@ impl Worker {
         // Execute task with timeout enforcement
         let task_handle = tokio::spawn({
             let params = task.params.clone();
-            async move { handler.execute(params, ctx).await }
+            async move { handler.execute(params, ctx, context).await }
         });
         let abort_handle = task_handle.abort_handle();
 

@@ -24,12 +24,16 @@ pub struct ResearchResult {
 }
 
 #[async_trait]
-impl Task for ResearchTask {
+impl Task<()> for ResearchTask {
     const NAME: &'static str = "research";
     type Params = ResearchParams;
     type Output = ResearchResult;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         // Phase 1: Find relevant sources (checkpointed)
         let sources: Vec<String> = ctx
             .step("find-sources", || async {
@@ -75,12 +79,16 @@ pub struct EchoParams {
 }
 
 #[async_trait]
-impl Task for EchoTask {
+impl Task<()> for EchoTask {
     const NAME: &'static str = "echo";
     type Params = EchoParams;
     type Output = String;
 
-    async fn run(params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        _ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         Ok(params.message)
     }
 }
@@ -99,12 +107,16 @@ pub struct FailingParams {
 }
 
 #[async_trait]
-impl Task for FailingTask {
+impl Task<()> for FailingTask {
     const NAME: &'static str = "failing";
     type Params = FailingParams;
     type Output = ();
 
-    async fn run(params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        _ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         Err(TaskError::Failed(anyhow::anyhow!(
             "{}",
             params.error_message
@@ -128,12 +140,16 @@ pub struct MultiStepOutput {
 }
 
 #[async_trait]
-impl Task for MultiStepTask {
+impl Task<()> for MultiStepTask {
     const NAME: &'static str = "multi-step";
     type Params = ();
     type Output = MultiStepOutput;
 
-    async fn run(_params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        _params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         let step1: i32 = ctx.step("step1", || async { Ok(1) }).await?;
         let step2: i32 = ctx.step("step2", || async { Ok(2) }).await?;
         let step3: i32 = ctx.step("step3", || async { Ok(3) }).await?;
@@ -159,12 +175,16 @@ pub struct SleepParams {
 }
 
 #[async_trait]
-impl Task for SleepingTask {
+impl Task<()> for SleepingTask {
     const NAME: &'static str = "sleeping";
     type Params = SleepParams;
     type Output = String;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         ctx.sleep_for("wait", std::time::Duration::from_secs(params.seconds))
             .await?;
         Ok("woke up".to_string())
@@ -186,12 +206,16 @@ pub struct EventWaitParams {
 }
 
 #[async_trait]
-impl Task for EventWaitingTask {
+impl Task<()> for EventWaitingTask {
     const NAME: &'static str = "event-waiting";
     type Params = EventWaitParams;
     type Output = serde_json::Value;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         let timeout = params.timeout_seconds.map(std::time::Duration::from_secs);
         let payload: serde_json::Value = ctx.await_event(&params.event_name, timeout).await?;
         Ok(payload)
@@ -231,12 +255,16 @@ pub struct StepCountingOutput {
 }
 
 #[async_trait]
-impl Task for StepCountingTask {
+impl Task<()> for StepCountingTask {
     const NAME: &'static str = "step-counting";
     type Params = StepCountingParams;
     type Output = StepCountingOutput;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         // Each step returns a unique value that indicates it ran
         let step1_value: String = ctx
             .step("step1", || async { Ok("step1_executed".to_string()) })
@@ -272,12 +300,16 @@ impl Task for StepCountingTask {
 pub struct EmptyParamsTask;
 
 #[async_trait]
-impl Task for EmptyParamsTask {
+impl Task<()> for EmptyParamsTask {
     const NAME: &'static str = "empty-params";
     type Params = ();
     type Output = String;
 
-    async fn run(_params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        _params: Self::Params,
+        _ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         Ok("completed".to_string())
     }
 }
@@ -296,12 +328,12 @@ pub struct HeartbeatParams {
 }
 
 #[async_trait]
-impl Task for HeartbeatTask {
+impl Task<()> for HeartbeatTask {
     const NAME: &'static str = "heartbeat";
     type Params = HeartbeatParams;
     type Output = u32;
 
-    async fn run(params: Self::Params, ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, ctx: TaskContext, _app_ctx: ()) -> TaskResult<Self::Output> {
         for _i in 0..params.iterations {
             // Simulate work
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -328,12 +360,16 @@ pub struct ConvenienceMethodsOutput {
 }
 
 #[async_trait]
-impl Task for ConvenienceMethodsTask {
+impl Task<()> for ConvenienceMethodsTask {
     const NAME: &'static str = "convenience-methods";
     type Params = ();
     type Output = ConvenienceMethodsOutput;
 
-    async fn run(_params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        _params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         let rand_value = ctx.rand().await?;
         let now_value = ctx.now().await?;
         let uuid_value = ctx.uuid7().await?;
@@ -363,12 +399,16 @@ pub struct MultipleCallsOutput {
 }
 
 #[async_trait]
-impl Task for MultipleConvenienceCallsTask {
+impl Task<()> for MultipleConvenienceCallsTask {
     const NAME: &'static str = "multiple-convenience-calls";
     type Params = ();
     type Output = MultipleCallsOutput;
 
-    async fn run(_params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        _params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         let rand1 = ctx.rand().await?;
         let rand2 = ctx.rand().await?;
         let uuid1 = ctx.uuid7().await?;
@@ -391,12 +431,16 @@ impl Task for MultipleConvenienceCallsTask {
 pub struct ReservedPrefixTask;
 
 #[async_trait]
-impl Task for ReservedPrefixTask {
+impl Task<()> for ReservedPrefixTask {
     const NAME: &'static str = "reserved-prefix";
     type Params = ();
     type Output = ();
 
-    async fn run(_params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        _params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         // This should fail because $ is reserved
         let _: String = ctx
             .step("$bad-name", || async { Ok("test".into()) })
@@ -420,12 +464,16 @@ pub struct DoubleParams {
 }
 
 #[async_trait]
-impl Task for DoubleTask {
+impl Task<()> for DoubleTask {
     const NAME: &'static str = "double";
     type Params = DoubleParams;
     type Output = i32;
 
-    async fn run(params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        _ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         Ok(params.value * 2)
     }
 }
@@ -435,12 +483,16 @@ impl Task for DoubleTask {
 pub struct FailingChildTask;
 
 #[async_trait]
-impl Task for FailingChildTask {
+impl Task<()> for FailingChildTask {
     const NAME: &'static str = "failing-child";
     type Params = ();
     type Output = ();
 
-    async fn run(_params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        _params: Self::Params,
+        _ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         Err(TaskError::Failed(anyhow::anyhow!(
             "Child task failed intentionally"
         )))
@@ -468,15 +520,19 @@ pub struct SingleSpawnOutput {
 }
 
 #[async_trait]
-impl Task for SingleSpawnTask {
+impl Task<()> for SingleSpawnTask {
     const NAME: &'static str = "single-spawn";
     type Params = SingleSpawnParams;
     type Output = SingleSpawnOutput;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         // Spawn child task
         let handle: TaskHandle<i32> = ctx
-            .spawn::<DoubleTask>(
+            .spawn::<DoubleTask, ()>(
                 "child",
                 DoubleParams {
                     value: params.child_value,
@@ -509,17 +565,21 @@ pub struct MultiSpawnOutput {
 }
 
 #[async_trait]
-impl Task for MultiSpawnTask {
+impl Task<()> for MultiSpawnTask {
     const NAME: &'static str = "multi-spawn";
     type Params = MultiSpawnParams;
     type Output = MultiSpawnOutput;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         // Spawn all children
         let mut handles = Vec::new();
         for (i, value) in params.values.iter().enumerate() {
             let handle: TaskHandle<i32> = ctx
-                .spawn::<DoubleTask>(
+                .spawn::<DoubleTask, ()>(
                     &format!("child-{i}"),
                     DoubleParams { value: *value },
                     Default::default(),
@@ -544,15 +604,19 @@ impl Task for MultiSpawnTask {
 pub struct SpawnFailingChildTask;
 
 #[async_trait]
-impl Task for SpawnFailingChildTask {
+impl Task<()> for SpawnFailingChildTask {
     const NAME: &'static str = "spawn-failing-child";
     type Params = ();
     type Output = ();
 
-    async fn run(_params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        _params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         // Spawn with max_attempts=1 so child fails immediately without retries
         let handle: TaskHandle<()> = ctx
-            .spawn::<FailingChildTask>(
+            .spawn::<FailingChildTask, ()>(
                 "child",
                 (),
                 SpawnOptions {
@@ -584,12 +648,12 @@ pub struct LongRunningHeartbeatParams {
 }
 
 #[async_trait]
-impl Task for LongRunningHeartbeatTask {
+impl Task<()> for LongRunningHeartbeatTask {
     const NAME: &'static str = "long-running-heartbeat";
     type Params = LongRunningHeartbeatParams;
     type Output = String;
 
-    async fn run(params: Self::Params, ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, ctx: TaskContext, _app_ctx: ()) -> TaskResult<Self::Output> {
         let start = std::time::Instant::now();
         let total_duration = std::time::Duration::from_millis(params.total_duration_ms);
         let heartbeat_interval = std::time::Duration::from_millis(params.heartbeat_interval_ms);
@@ -614,12 +678,16 @@ pub struct SlowChildParams {
 }
 
 #[async_trait]
-impl Task for SlowChildTask {
+impl Task<()> for SlowChildTask {
     const NAME: &'static str = "slow-child";
     type Params = SlowChildParams;
     type Output = String;
 
-    async fn run(params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        _ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         tokio::time::sleep(std::time::Duration::from_millis(params.sleep_ms)).await;
         Ok("done".to_string())
     }
@@ -636,15 +704,19 @@ pub struct SpawnSlowChildParams {
 }
 
 #[async_trait]
-impl Task for SpawnSlowChildTask {
+impl Task<()> for SpawnSlowChildTask {
     const NAME: &'static str = "spawn-slow-child";
     type Params = SpawnSlowChildParams;
     type Output = String;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         // Spawn a slow child
         let handle: TaskHandle<String> = ctx
-            .spawn::<SlowChildTask>(
+            .spawn::<SlowChildTask, ()>(
                 "slow-child",
                 SlowChildParams {
                     sleep_ms: params.child_sleep_ms,
@@ -674,12 +746,12 @@ pub struct EventEmitterParams {
 }
 
 #[async_trait]
-impl Task for EventEmitterTask {
+impl Task<()> for EventEmitterTask {
     const NAME: &'static str = "event-emitter";
     type Params = EventEmitterParams;
     type Output = String;
 
-    async fn run(params: Self::Params, ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, ctx: TaskContext, _app_ctx: ()) -> TaskResult<Self::Output> {
         ctx.emit_event(&params.event_name, &params.payload).await?;
         Ok("emitted".to_string())
     }
@@ -699,12 +771,16 @@ pub struct ManyStepsParams {
 }
 
 #[async_trait]
-impl Task for ManyStepsTask {
+impl Task<()> for ManyStepsTask {
     const NAME: &'static str = "many-steps";
     type Params = ManyStepsParams;
     type Output = u32;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         for i in 0..params.num_steps {
             let _: u32 = ctx
                 .step(&format!("step-{i}"), || async move { Ok(i) })
@@ -729,12 +805,16 @@ pub struct LargePayloadParams {
 }
 
 #[async_trait]
-impl Task for LargePayloadTask {
+impl Task<()> for LargePayloadTask {
     const NAME: &'static str = "large-payload";
     type Params = LargePayloadParams;
     type Output = String;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         // Create a large string of repeated characters
         let payload: String = ctx
             .step(
@@ -761,12 +841,16 @@ pub struct CpuBoundParams {
 }
 
 #[async_trait]
-impl Task for CpuBoundTask {
+impl Task<()> for CpuBoundTask {
     const NAME: &'static str = "cpu-bound";
     type Params = CpuBoundParams;
     type Output = String;
 
-    async fn run(params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        _ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         let start = std::time::Instant::now();
         let duration = std::time::Duration::from_millis(params.duration_ms);
 
@@ -795,12 +879,16 @@ pub struct SlowNoHeartbeatParams {
 }
 
 #[async_trait]
-impl Task for SlowNoHeartbeatTask {
+impl Task<()> for SlowNoHeartbeatTask {
     const NAME: &'static str = "slow-no-heartbeat";
     type Params = SlowNoHeartbeatParams;
     type Output = String;
 
-    async fn run(params: Self::Params, _ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        _ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         // Just sleep - no heartbeat calls
         tokio::time::sleep(std::time::Duration::from_millis(params.sleep_ms)).await;
         Ok("done".to_string())
@@ -858,12 +946,16 @@ pub fn get_execution_tracker() -> Option<Arc<ExecutionTracker>> {
 pub struct CheckpointReplayTask;
 
 #[async_trait]
-impl Task for CheckpointReplayTask {
+impl Task<()> for CheckpointReplayTask {
     const NAME: &'static str = "checkpoint-replay";
     type Params = ();
     type Output = String;
 
-    async fn run(_params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        _params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         let tracker = get_execution_tracker();
 
         // Step 1 - increment counter every time closure actually runs
@@ -941,12 +1033,16 @@ pub fn reset_deterministic_task_state() {
 }
 
 #[async_trait]
-impl Task for DeterministicReplayTask {
+impl Task<()> for DeterministicReplayTask {
     const NAME: &'static str = "deterministic-replay";
     type Params = DeterministicReplayParams;
     type Output = DeterministicReplayOutput;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         let rand_value = ctx.rand().await?;
         let now_value = ctx.now().await?;
         let uuid_value = ctx.uuid7().await?;
@@ -999,12 +1095,16 @@ pub struct EventThenFailParams {
 }
 
 #[async_trait]
-impl Task for EventThenFailTask {
+impl Task<()> for EventThenFailTask {
     const NAME: &'static str = "event-then-fail";
     type Params = EventThenFailParams;
     type Output = serde_json::Value;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         // Wait for event (will be checkpointed)
         let payload: serde_json::Value = ctx.await_event(&params.event_name, None).await?;
 
@@ -1045,12 +1145,16 @@ pub struct EventThenDelayParams {
 }
 
 #[async_trait]
-impl Task for EventThenDelayTask {
+impl Task<()> for EventThenDelayTask {
     const NAME: &'static str = "event-then-delay";
     type Params = EventThenDelayParams;
     type Output = serde_json::Value;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         // Wait for event (will be checkpointed)
         let payload: serde_json::Value = ctx.await_event(&params.event_name, None).await?;
 
@@ -1078,12 +1182,16 @@ pub struct MultiEventParams {
 }
 
 #[async_trait]
-impl Task for MultiEventTask {
+impl Task<()> for MultiEventTask {
     const NAME: &'static str = "multi-event";
     type Params = MultiEventParams;
     type Output = serde_json::Value;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         let payload1: serde_json::Value = ctx.await_event(&params.event1_name, None).await?;
         let payload2: serde_json::Value = ctx.await_event(&params.event2_name, None).await?;
 
@@ -1117,17 +1225,21 @@ pub struct SpawnThenFailParams {
 }
 
 #[async_trait]
-impl Task for SpawnThenFailTask {
+impl Task<()> for SpawnThenFailTask {
     const NAME: &'static str = "spawn-then-fail";
     type Params = SpawnThenFailParams;
     type Output = serde_json::Value;
 
-    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _app_ctx: (),
+    ) -> TaskResult<Self::Output> {
         use durable::SpawnOptions;
 
         // Spawn child (should be idempotent)
         let child_handle = ctx
-            .spawn::<ManyStepsTask>(
+            .spawn::<ManyStepsTask, ()>(
                 "child",
                 ManyStepsParams {
                     num_steps: params.child_steps,

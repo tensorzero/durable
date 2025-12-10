@@ -431,12 +431,16 @@ impl TaskContext {
     /// let r1: ItemResult = ctx.join("item-1", h1).await?;
     /// let r2: ItemResult = ctx.join("item-2", h2).await?;
     /// ```
-    pub async fn spawn<T: Task>(
+    pub async fn spawn<T, Ctx>(
         &mut self,
         name: &str,
         params: T::Params,
         options: crate::SpawnOptions,
-    ) -> TaskResult<TaskHandle<T::Output>> {
+    ) -> TaskResult<TaskHandle<T::Output>>
+    where
+        T: Task<Ctx>,
+        Ctx: Clone + Send + Sync + 'static,
+    {
         validate_user_name(name)?;
         let checkpoint_name = self.get_checkpoint_name(&format!("$spawn:{name}"));
 

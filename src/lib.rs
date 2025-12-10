@@ -22,12 +22,12 @@
 //! struct MyTask;
 //!
 //! #[async_trait]
-//! impl Task for MyTask {
+//! impl Task<()> for MyTask {
 //!     const NAME: &'static str = "my-task";
 //!     type Params = MyParams;
 //!     type Output = MyOutput;
 //!
-//!     async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+//!     async fn run(params: Self::Params, mut ctx: TaskContext, _app_ctx: ()) -> TaskResult<Self::Output> {
 //!         let doubled = ctx.step("double", || async {
 //!             Ok(params.value * 2)
 //!         }).await?;
@@ -48,6 +48,41 @@
 //!     worker.shutdown().await;
 //!     Ok(())
 //! }
+//! ```
+//!
+//! # Application Context
+//!
+//! Tasks can receive application context (like HTTP clients, database pools) via the
+//! generic `Ctx` type parameter:
+//!
+//! ```ignore
+//! #[derive(Clone)]
+//! struct AppContext {
+//!     http_client: reqwest::Client,
+//! }
+//!
+//! struct FetchTask;
+//!
+//! #[async_trait]
+//! impl Task<AppContext> for FetchTask {
+//!     const NAME: &'static str = "fetch";
+//!     type Params = String;
+//!     type Output = String;
+//!
+//!     async fn run(url: Self::Params, mut ctx: TaskContext, app_ctx: AppContext) -> TaskResult<Self::Output> {
+//!         ctx.step("fetch", || async {
+//!             app_ctx.http_client.get(&url).send().await?.text().await
+//!                 .map_err(|e| anyhow::anyhow!(e))
+//!         }).await
+//!     }
+//! }
+//!
+//! // Build client with context
+//! let app_ctx = AppContext { http_client: reqwest::Client::new() };
+//! let client = Durable::builder()
+//!     .database_url("postgres://localhost/myapp")
+//!     .build_with_context(app_ctx)
+//!     .await?;
 //! ```
 //!
 //! # Key Types

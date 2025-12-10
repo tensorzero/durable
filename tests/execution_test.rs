@@ -640,3 +640,136 @@ async fn test_long_running_task_with_heartbeat_completes(pool: PgPool) -> sqlx::
 
     Ok(())
 }
+
+// ============================================================================
+// Application Context Tests
+// ============================================================================
+
+/// Application context that holds a database pool for tasks to use.
+#[derive(Clone)]
+struct AppContext {
+    db_pool: PgPool,
+}
+
+/// A task that uses the application context to write to a database table.
+struct WriteToDbTask;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct WriteToDbParams {
+    key: String,
+    value: String,
+}
+
+#[durable::async_trait]
+impl durable::Task<AppContext> for WriteToDbTask {
+    const NAME: &'static str = "write-to-db";
+    type Params = WriteToDbParams;
+    type Output = i64;
+
+    async fn run(
+        params: Self::Params,
+        mut ctx: durable::TaskContext,
+        app_ctx: AppContext,
+    ) -> durable::TaskResult<Self::Output> {
+        // Use the app context's db pool to write to a table
+        let row_id: i64 = ctx
+            .step("insert", || async {
+                let (id,): (i64,) = sqlx::query_as(
+                    "INSERT INTO test_context_table (key, value) VALUES ($1, $2) RETURNING id",
+                )
+                .bind(&params.key)
+                .bind(&params.value)
+                .fetch_one(&app_ctx.db_pool)
+                .await
+                .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+                Ok(id)
+            })
+            .await?;
+
+        Ok(row_id)
+    }
+}
+
+/// Helper to create a Durable client with application context.
+async fn create_client_with_context(
+    pool: PgPool,
+    queue_name: &str,
+) -> durable::Durable<AppContext> {
+    let app_ctx = AppContext {
+        db_pool: pool.clone(),
+    };
+    durable::Durable::builder()
+        .pool(pool)
+        .queue_name(queue_name)
+        .build_with_context(app_ctx)
+        .await
+        .expect("Failed to create Durable client with context")
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_task_uses_application_context(pool: PgPool) -> sqlx::Result<()> {
+    // Create a test table for the task to write to
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS test_context_table (
+            id BIGSERIAL PRIMARY KEY,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL
+        )",
+    )
+    .execute(&pool)
+    .await?;
+
+    // Create client with application context
+    let client = create_client_with_context(pool.clone(), "exec_context").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<WriteToDbTask>().await;
+
+    // Spawn a task that will use the context to write to the database
+    let spawn_result = client
+        .spawn::<WriteToDbTask>(WriteToDbParams {
+            key: "test_key".to_string(),
+            value: "test_value".to_string(),
+        })
+        .await
+        .expect("Failed to spawn task");
+
+    // Start worker
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            ..Default::default()
+        })
+        .await;
+
+    // Wait for task to complete
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    worker.shutdown().await;
+
+    // Verify task completed
+    let state = get_task_state(&pool, "exec_context", spawn_result.task_id).await;
+    assert_eq!(state, "completed", "Task should complete successfully");
+
+    // Verify the task actually wrote to the database using the context
+    let (key, value): (String, String) =
+        sqlx::query_as("SELECT key, value FROM test_context_table WHERE key = 'test_key'")
+            .fetch_one(&pool)
+            .await?;
+
+    assert_eq!(key, "test_key");
+    assert_eq!(value, "test_value");
+
+    // Verify the task returned the row ID
+    let result = get_task_result(&pool, "exec_context", spawn_result.task_id)
+        .await
+        .expect("Task should have a result");
+    let row_id: i64 = serde_json::from_value(result).expect("Result should be i64");
+    assert!(row_id > 0, "Row ID should be positive");
+
+    // Cleanup
+    sqlx::query("DROP TABLE test_context_table")
+        .execute(&pool)
+        .await?;
+
+    Ok(())
+}
