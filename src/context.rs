@@ -4,11 +4,13 @@ use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::error::{ControlFlow, TaskError, TaskResult};
-use crate::task::Task;
+use crate::task::{Task, TaskRegistry};
 use crate::types::{
     AwaitEventResult, CheckpointRow, ChildCompletePayload, ChildStatus, ClaimedTask, SpawnOptions,
     SpawnResultRow, TaskHandle,
@@ -67,6 +69,9 @@ where
     /// Notifies the worker when the lease is extended via step() or heartbeat().
     lease_extender: LeaseExtender,
 
+    /// Task registry for validating spawn_by_name calls.
+    registry: Arc<RwLock<TaskRegistry<State>>>,
+
     /// Phantom data to carry the State type parameter.
     _state: PhantomData<State>,
 }
@@ -93,6 +98,7 @@ where
         task: ClaimedTask,
         claim_timeout: u64,
         lease_extender: LeaseExtender,
+        registry: Arc<RwLock<TaskRegistry<State>>>,
     ) -> Result<Self, sqlx::Error> {
         // Load all checkpoints for this task into cache
         let checkpoints: Vec<CheckpointRow> = sqlx::query_as(
@@ -120,6 +126,7 @@ where
             checkpoint_cache: cache,
             step_counters: HashMap::new(),
             lease_extender,
+            registry,
             _state: PhantomData,
         })
     }
@@ -456,6 +463,57 @@ where
     where
         T: Task<State>,
     {
+        let params_json = serde_json::to_value(&params)?;
+        self.spawn_by_name(name, T::NAME, params_json, options)
+            .await
+    }
+
+    /// Spawn a subtask by task name (dynamic version).
+    ///
+    /// This is similar to [`spawn`](Self::spawn) but works with task names
+    /// instead of requiring a concrete type. Useful for dynamic task invocation
+    /// where the task type isn't known at compile time.
+    ///
+    /// The spawn is checkpointed - if this task retries after spawning, the
+    /// same subtask ID is returned without spawning a duplicate.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Unique name for this spawn operation (used for checkpointing)
+    /// * `task_name` - The registered name of the task to spawn
+    /// * `params` - JSON parameters to pass to the task
+    /// * `options` - Spawn options (max_attempts, priority, etc.)
+    ///
+    /// # Returns
+    ///
+    /// A [`TaskHandle`] that can be passed to [`join`](Self::join) to wait for
+    /// the result. The output type `T` must match the actual task's output type.
+    ///
+    /// # Errors
+    ///
+    /// * `TaskError::Failed` - If the task name is not registered in the registry
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Spawn a task by name
+    /// let handle: TaskHandle<ProcessResult> = ctx.spawn_by_name(
+    ///     "process-item",
+    ///     "process-item-task",
+    ///     serde_json::json!({ "item_id": 123 }),
+    ///     Default::default(),
+    /// ).await?;
+    ///
+    /// // Wait for result
+    /// let result: ProcessResult = ctx.join("process-item", handle).await?;
+    /// ```
+    pub async fn spawn_by_name<T: DeserializeOwned>(
+        &mut self,
+        name: &str,
+        task_name: &str,
+        params: JsonValue,
+        options: SpawnOptions,
+    ) -> TaskResult<TaskHandle<T>> {
         validate_user_name(name)?;
         let checkpoint_name = self.get_checkpoint_name(&format!("$spawn:{name}"));
 
@@ -465,8 +523,18 @@ where
             return Ok(TaskHandle::new(task_id));
         }
 
+        // Validate that the task is registered
+        {
+            let registry = self.registry.read().await;
+            if !registry.contains_key(task_name) {
+                return Err(TaskError::Failed(anyhow::anyhow!(
+                    "Unknown task: {}. Task must be registered before spawning.",
+                    task_name
+                )));
+            }
+        }
+
         // Build options JSON, merging user options with parent_task_id
-        let params_json = serde_json::to_value(&params)?;
         #[derive(Serialize)]
         struct SubtaskOptions<'a> {
             parent_task_id: Uuid,
@@ -482,8 +550,8 @@ where
             "SELECT task_id, run_id, attempt FROM durable.spawn_task($1, $2, $3, $4)",
         )
         .bind(&self.queue_name)
-        .bind(T::NAME)
-        .bind(&params_json)
+        .bind(task_name)
+        .bind(&params)
         .bind(&options_json)
         .fetch_one(&self.pool)
         .await?;
