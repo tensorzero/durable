@@ -101,6 +101,9 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
+    // Create the queue (idempotent - safe to call on every startup)
+    client.create_queue(None).await?;
+
     // Register your task
     client.register::<ResearchTask>().await;
 
