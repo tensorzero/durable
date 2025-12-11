@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value as JsonValue;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use crate::context::TaskContext;
 use crate::error::{TaskError, TaskResult};
@@ -134,4 +133,4 @@ where
 }
 
 /// Type alias for the task registry
-pub type TaskRegistry<State> = std::collections::HashMap<String, Arc<dyn ErasedTask<State>>>;
+pub type TaskRegistry<State> = std::collections::HashMap<String, &'static dyn ErasedTask<State>>;

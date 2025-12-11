@@ -262,7 +262,7 @@ where
     /// Register a task type. Required before spawning or processing.
     pub async fn register<T: Task<State>>(&self) -> &Self {
         let mut registry = self.registry.write().await;
-        registry.insert(T::NAME.to_string(), Arc::new(PhantomData::<T>));
+        registry.insert(T::NAME.to_string(), &PhantomData::<T>);
         self
     }
 
