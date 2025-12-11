@@ -2,11 +2,12 @@ use serde::Serialize;
 use serde_json::Value as JsonValue;
 use sqlx::{Executor, PgPool, Postgres};
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::task::{Task, TaskRegistry, TaskWrapper};
+use crate::task::{Task, TaskRegistry};
 use crate::types::{
     CancellationPolicy, RetryStrategy, SpawnOptions, SpawnResult, SpawnResultRow, WorkerOptions,
 };
@@ -276,10 +277,7 @@ where
     /// Register a task type. Required before spawning or processing.
     pub async fn register<T: Task<State>>(&self) -> &Self {
         let mut registry = self.registry.write().await;
-        registry.insert(
-            T::NAME.to_string(),
-            Arc::new(TaskWrapper::<T, State>::new()),
-        );
+        registry.insert(T::NAME.to_string(), &PhantomData::<T>);
         self
     }
 
@@ -299,14 +297,26 @@ where
             .await
     }
 
-    /// Spawn a task by name (dynamic version for unregistered tasks)
+    /// Spawn a task by name (dynamic version).
+    ///
+    /// The task must be registered before spawning.
     pub async fn spawn_by_name(
         &self,
         task_name: &str,
         params: JsonValue,
         options: SpawnOptions,
     ) -> anyhow::Result<SpawnResult> {
-        self.spawn_by_name_with(&self.pool, task_name, params, options)
+        // Validate that the task is registered
+        {
+            let registry = self.registry.read().await;
+            anyhow::ensure!(
+                registry.contains_key(task_name),
+                "Unknown task: {}. Task must be registered before spawning.",
+                task_name
+            );
+        }
+
+        self.spawn_by_name_internal(&self.pool, task_name, params, options)
             .await
     }
 
@@ -352,11 +362,14 @@ where
         T: Task<State>,
         E: Executor<'e, Database = Postgres>,
     {
-        self.spawn_by_name_with(executor, T::NAME, serde_json::to_value(&params)?, options)
+        // Type-safe spawn uses T::NAME which is already registered
+        self.spawn_by_name_internal(executor, T::NAME, serde_json::to_value(&params)?, options)
             .await
     }
 
     /// Spawn a task by name using a custom executor.
+    ///
+    /// The task must be registered before spawning.
     #[cfg_attr(
         feature = "telemetry",
         tracing::instrument(
@@ -365,8 +378,33 @@ where
             fields(queue, task_name = %task_name)
         )
     )]
-    #[allow(unused_mut)] // mut is needed when telemetry feature is enabled
     pub async fn spawn_by_name_with<'e, E>(
+        &self,
+        executor: E,
+        task_name: &str,
+        params: JsonValue,
+        options: SpawnOptions,
+    ) -> anyhow::Result<SpawnResult>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        // Validate that the task is registered
+        {
+            let registry = self.registry.read().await;
+            anyhow::ensure!(
+                registry.contains_key(task_name),
+                "Unknown task: {}. Task must be registered before spawning.",
+                task_name
+            );
+        }
+
+        self.spawn_by_name_internal(executor, task_name, params, options)
+            .await
+    }
+
+    /// Internal spawn implementation without registry validation.
+    #[allow(unused_mut)] // mut is needed when telemetry feature is enabled
+    async fn spawn_by_name_internal<'e, E>(
         &self,
         executor: E,
         task_name: &str,

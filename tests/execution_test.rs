@@ -349,32 +349,24 @@ async fn test_unregistered_task_fails(pool: PgPool) -> sqlx::Result<()> {
     client.create_queue(None).await.unwrap();
     // Note: We don't register any task handler
 
-    // Spawn a task by name
+    // Spawn a task by name - should fail at spawn time because task is not registered
     let spawn_result = client
         .spawn_by_name(
             "unregistered-task",
             serde_json::json!({}),
             Default::default(),
         )
-        .await
-        .expect("Failed to spawn task");
-
-    let worker = client
-        .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
-            ..Default::default()
-        })
         .await;
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    worker.shutdown().await;
-
-    // Task should have failed because handler is not registered
-    let state = get_task_state(&pool, "exec_unreg", spawn_result.task_id).await;
-    assert_eq!(
-        state, "failed",
-        "Task with unregistered handler should fail"
+    assert!(
+        spawn_result.is_err(),
+        "Spawning an unregistered task should fail"
+    );
+    let err = spawn_result.unwrap_err();
+    assert!(
+        err.to_string().contains("Unknown task"),
+        "Error should mention 'Unknown task': {}",
+        err
     );
 
     Ok(())

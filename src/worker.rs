@@ -324,6 +324,7 @@ impl Worker {
             task.clone(),
             claim_timeout,
             lease_extender,
+            registry.clone(),
         )
         .await
         {
@@ -338,7 +339,7 @@ impl Worker {
         // Look up handler
         let registry = registry.read().await;
         let handler = match registry.get(&task.task_name) {
-            Some(h) => h.clone(),
+            Some(h) => *h,
             None => {
                 tracing::error!("Unknown task: {}", task.task_name);
                 Self::fail_run(
@@ -396,6 +397,7 @@ impl Worker {
                                 deadline = Instant::now();
                                 warn_fired = false;
                             }
+
                         }
 
                         _ = sleep_until(warn_at), if !warn_fired => {

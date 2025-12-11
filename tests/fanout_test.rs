@@ -4,8 +4,9 @@ mod common;
 
 use common::tasks::{
     DoubleTask, FailingChildTask, MultiSpawnOutput, MultiSpawnParams, MultiSpawnTask,
-    SingleSpawnOutput, SingleSpawnParams, SingleSpawnTask, SlowChildTask, SpawnFailingChildTask,
-    SpawnSlowChildParams, SpawnSlowChildTask,
+    SingleSpawnOutput, SingleSpawnParams, SingleSpawnTask, SlowChildTask, SpawnByNameOutput,
+    SpawnByNameParams, SpawnByNameTask, SpawnFailingChildTask, SpawnSlowChildParams,
+    SpawnSlowChildTask,
 };
 use durable::{Durable, MIGRATOR, WorkerOptions};
 use sqlx::{AssertSqlSafe, PgPool};
@@ -345,6 +346,56 @@ async fn test_cascade_cancel_when_parent_cancelled(pool: PgPool) -> sqlx::Result
             "Child tasks should be cascade cancelled"
         );
     }
+
+    Ok(())
+}
+
+// ============================================================================
+// spawn_by_name Tests
+// ============================================================================
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_spawn_by_name_from_task_context(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "fanout_by_name").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<SpawnByNameTask>().await;
+    client.register::<DoubleTask>().await;
+
+    // Spawn parent task that will use spawn_by_name internally
+    let spawn_result = client
+        .spawn::<SpawnByNameTask>(SpawnByNameParams { child_value: 21 })
+        .await
+        .expect("Failed to spawn task");
+
+    // Start worker with concurrency to handle both parent and child
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            concurrency: 2,
+            ..Default::default()
+        })
+        .await;
+
+    // Wait for tasks to complete
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+    worker.shutdown().await;
+
+    // Verify parent task completed
+    let state = get_task_state(&pool, "fanout_by_name", spawn_result.task_id).await;
+    assert_eq!(state, "completed", "Parent task should be completed");
+
+    // Verify result
+    let result = get_task_result(&pool, "fanout_by_name", spawn_result.task_id)
+        .await
+        .expect("Task should have a result");
+
+    let output: SpawnByNameOutput =
+        serde_json::from_value(result).expect("Failed to deserialize result");
+    assert_eq!(
+        output.child_result, 42,
+        "Child should have doubled 21 to 42 (spawned via spawn_by_name)"
+    );
 
     Ok(())
 }

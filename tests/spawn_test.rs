@@ -251,7 +251,7 @@ async fn test_spawn_with_cancellation_policy(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_by_name(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_by_name").await;
     client.create_queue(None).await.unwrap();
-    // Note: We don't register the task - spawn_by_name works without registration
+    client.register::<EchoTask>().await;
 
     let params = serde_json::json!({
         "message": "dynamic spawn"
@@ -271,9 +271,10 @@ async fn test_spawn_by_name(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_by_name_with_options(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_by_name_opts").await;
     client.create_queue(None).await.unwrap();
+    client.register::<EchoTask>().await;
 
     let params = serde_json::json!({
-        "key": "value"
+        "message": "value"
     });
 
     let options = SpawnOptions {
@@ -283,7 +284,7 @@ async fn test_spawn_by_name_with_options(pool: PgPool) -> sqlx::Result<()> {
     };
 
     let result = client
-        .spawn_by_name("custom-task", params, options)
+        .spawn_by_name("echo", params, options)
         .await
         .expect("Failed to spawn task by name with options");
 
@@ -300,9 +301,11 @@ async fn test_spawn_by_name_with_options(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_with_empty_params(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_empty").await;
     client.create_queue(None).await.unwrap();
+    client.register::<EchoTask>().await;
 
+    // Empty object is valid JSON params for EchoTask (message will be missing but that's ok for this test)
     let result = client
-        .spawn_by_name("empty-task", serde_json::json!({}), SpawnOptions::default())
+        .spawn_by_name("echo", serde_json::json!({}), SpawnOptions::default())
         .await
         .expect("Failed to spawn task with empty params");
 
@@ -315,7 +318,10 @@ async fn test_spawn_with_empty_params(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_with_complex_params(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_complex").await;
     client.create_queue(None).await.unwrap();
+    client.register::<EchoTask>().await;
 
+    // Complex nested JSON structure - the params don't need to match the task's Params type
+    // because spawn_by_name accepts arbitrary JSON
     let params = serde_json::json!({
         "nested": {
             "array": [1, 2, 3],
@@ -330,7 +336,7 @@ async fn test_spawn_with_complex_params(pool: PgPool) -> sqlx::Result<()> {
     });
 
     let result = client
-        .spawn_by_name("complex-task", params, SpawnOptions::default())
+        .spawn_by_name("echo", params, SpawnOptions::default())
         .await
         .expect("Failed to spawn task with complex params");
 
