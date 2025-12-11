@@ -27,7 +27,7 @@
 //!     type Params = MyParams;
 //!     type Output = MyOutput;
 //!
-//!     async fn run(params: Self::Params, mut ctx: TaskContext, _app_ctx: ()) -> TaskResult<Self::Output> {
+//!     async fn run(params: Self::Params, mut ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
 //!         let doubled = ctx.step("double", || async {
 //!             Ok(params.value * 2)
 //!         }).await?;
@@ -50,38 +50,38 @@
 //! }
 //! ```
 //!
-//! # Application Context
+//! # Application State
 //!
-//! Tasks can receive application context (like HTTP clients, database pools) via the
-//! generic `Ctx` type parameter:
+//! Tasks can receive application state (like HTTP clients, database pools) via the
+//! generic `State` type parameter:
 //!
 //! ```ignore
 //! #[derive(Clone)]
-//! struct AppContext {
+//! struct AppState {
 //!     http_client: reqwest::Client,
 //! }
 //!
 //! struct FetchTask;
 //!
 //! #[async_trait]
-//! impl Task<AppContext> for FetchTask {
+//! impl Task<AppState> for FetchTask {
 //!     const NAME: &'static str = "fetch";
 //!     type Params = String;
 //!     type Output = String;
 //!
-//!     async fn run(url: Self::Params, mut ctx: TaskContext, app_ctx: AppContext) -> TaskResult<Self::Output> {
+//!     async fn run(url: Self::Params, mut ctx: TaskContext, state: AppState) -> TaskResult<Self::Output> {
 //!         ctx.step("fetch", || async {
-//!             app_ctx.http_client.get(&url).send().await?.text().await
+//!             state.http_client.get(&url).send().await?.text().await
 //!                 .map_err(|e| anyhow::anyhow!(e))
 //!         }).await
 //!     }
 //! }
 //!
-//! // Build client with context
-//! let app_ctx = AppContext { http_client: reqwest::Client::new() };
+//! // Build client with state
+//! let app_state = AppState { http_client: reqwest::Client::new() };
 //! let client = Durable::builder()
 //!     .database_url("postgres://localhost/myapp")
-//!     .build_with_context(app_ctx)
+//!     .build_with_state(app_state)
 //!     .await?;
 //! ```
 //!

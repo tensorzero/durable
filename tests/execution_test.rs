@@ -642,16 +642,16 @@ async fn test_long_running_task_with_heartbeat_completes(pool: PgPool) -> sqlx::
 }
 
 // ============================================================================
-// Application Context Tests
+// Application State Tests
 // ============================================================================
 
-/// Application context that holds a database pool for tasks to use.
+/// Application state that holds a database pool for tasks to use.
 #[derive(Clone)]
-struct AppContext {
+struct AppState {
     db_pool: PgPool,
 }
 
-/// A task that uses the application context to write to a database table.
+/// A task that uses the application state to write to a database table.
 struct WriteToDbTask;
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -661,7 +661,7 @@ struct WriteToDbParams {
 }
 
 #[durable::async_trait]
-impl durable::Task<AppContext> for WriteToDbTask {
+impl durable::Task<AppState> for WriteToDbTask {
     const NAME: &'static str = "write-to-db";
     type Params = WriteToDbParams;
     type Output = i64;
@@ -669,17 +669,17 @@ impl durable::Task<AppContext> for WriteToDbTask {
     async fn run(
         params: Self::Params,
         mut ctx: durable::TaskContext,
-        app_ctx: AppContext,
+        state: AppState,
     ) -> durable::TaskResult<Self::Output> {
-        // Use the app context's db pool to write to a table
+        // Use the app state's db pool to write to a table
         let row_id: i64 = ctx
             .step("insert", || async {
                 let (id,): (i64,) = sqlx::query_as(
-                    "INSERT INTO test_context_table (key, value) VALUES ($1, $2) RETURNING id",
+                    "INSERT INTO test_state_table (key, value) VALUES ($1, $2) RETURNING id",
                 )
                 .bind(&params.key)
                 .bind(&params.value)
-                .fetch_one(&app_ctx.db_pool)
+                .fetch_one(&state.db_pool)
                 .await
                 .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
                 Ok(id)
@@ -690,27 +690,24 @@ impl durable::Task<AppContext> for WriteToDbTask {
     }
 }
 
-/// Helper to create a Durable client with application context.
-async fn create_client_with_context(
-    pool: PgPool,
-    queue_name: &str,
-) -> durable::Durable<AppContext> {
-    let app_ctx = AppContext {
+/// Helper to create a Durable client with application state.
+async fn create_client_with_state(pool: PgPool, queue_name: &str) -> durable::Durable<AppState> {
+    let app_state = AppState {
         db_pool: pool.clone(),
     };
     durable::Durable::builder()
         .pool(pool)
         .queue_name(queue_name)
-        .build_with_context(app_ctx)
+        .build_with_state(app_state)
         .await
-        .expect("Failed to create Durable client with context")
+        .expect("Failed to create Durable client with state")
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn test_task_uses_application_context(pool: PgPool) -> sqlx::Result<()> {
+async fn test_task_uses_application_state(pool: PgPool) -> sqlx::Result<()> {
     // Create a test table for the task to write to
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS test_context_table (
+        "CREATE TABLE IF NOT EXISTS test_state_table (
             id BIGSERIAL PRIMARY KEY,
             key TEXT NOT NULL,
             value TEXT NOT NULL
@@ -719,12 +716,12 @@ async fn test_task_uses_application_context(pool: PgPool) -> sqlx::Result<()> {
     .execute(&pool)
     .await?;
 
-    // Create client with application context
-    let client = create_client_with_context(pool.clone(), "exec_context").await;
+    // Create client with application state
+    let client = create_client_with_state(pool.clone(), "exec_state").await;
     client.create_queue(None).await.unwrap();
     client.register::<WriteToDbTask>().await;
 
-    // Spawn a task that will use the context to write to the database
+    // Spawn a task that will use the state to write to the database
     let spawn_result = client
         .spawn::<WriteToDbTask>(WriteToDbParams {
             key: "test_key".to_string(),
@@ -747,12 +744,12 @@ async fn test_task_uses_application_context(pool: PgPool) -> sqlx::Result<()> {
     worker.shutdown().await;
 
     // Verify task completed
-    let state = get_task_state(&pool, "exec_context", spawn_result.task_id).await;
-    assert_eq!(state, "completed", "Task should complete successfully");
+    let task_state = get_task_state(&pool, "exec_state", spawn_result.task_id).await;
+    assert_eq!(task_state, "completed", "Task should complete successfully");
 
-    // Verify the task actually wrote to the database using the context
+    // Verify the task actually wrote to the database using the state
     let (key, value): (String, String) =
-        sqlx::query_as("SELECT key, value FROM test_context_table WHERE key = 'test_key'")
+        sqlx::query_as("SELECT key, value FROM test_state_table WHERE key = 'test_key'")
             .fetch_one(&pool)
             .await?;
 
@@ -760,14 +757,14 @@ async fn test_task_uses_application_context(pool: PgPool) -> sqlx::Result<()> {
     assert_eq!(value, "test_value");
 
     // Verify the task returned the row ID
-    let result = get_task_result(&pool, "exec_context", spawn_result.task_id)
+    let result = get_task_result(&pool, "exec_state", spawn_result.task_id)
         .await
         .expect("Task should have a result");
     let row_id: i64 = serde_json::from_value(result).expect("Result should be i64");
     assert!(row_id > 0, "Row ID should be positive");
 
     // Cleanup
-    sqlx::query("DROP TABLE test_context_table")
+    sqlx::query("DROP TABLE test_state_table")
         .execute(&pool)
         .await?;
 

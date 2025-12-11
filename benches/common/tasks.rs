@@ -14,11 +14,7 @@ impl Task<()> for NoOpTask {
     type Params = ();
     type Output = ();
 
-    async fn run(
-        _params: Self::Params,
-        _ctx: TaskContext,
-        _app_ctx: (),
-    ) -> TaskResult<Self::Output> {
+    async fn run(_params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok(())
     }
 }
@@ -42,11 +38,7 @@ impl Task<()> for QuickTask {
     type Params = QuickParams;
     type Output = u32;
 
-    async fn run(
-        params: Self::Params,
-        _ctx: TaskContext,
-        _app_ctx: (),
-    ) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok(params.task_num)
     }
 }
@@ -73,7 +65,7 @@ impl Task<()> for MultiStepBenchTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         for i in 0..params.num_steps {
             let _: u32 = ctx
@@ -106,7 +98,7 @@ impl Task<()> for LargePayloadBenchTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         let payload = "x".repeat(params.payload_size);
         let _: String = ctx

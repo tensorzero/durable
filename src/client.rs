@@ -59,45 +59,45 @@ use crate::worker::Worker;
 ///
 /// # Type Parameter
 ///
-/// * `Ctx` - Application context type passed to task handlers. Use `()` if you
-///   don't need any context. The context must implement `Clone + Send + Sync + 'static`.
+/// * `State` - Application state type passed to task handlers. Use `()` if you
+///   don't need any state. The state must implement `Clone + Send + Sync + 'static`.
 ///
 /// # Example
 ///
 /// ```ignore
-/// // Without context (default)
+/// // Without state (default)
 /// let client = Durable::builder()
 ///     .database_url("postgres://localhost/myapp")
 ///     .queue_name("tasks")
 ///     .build()
 ///     .await?;
 ///
-/// // With application context
+/// // With application state
 /// #[derive(Clone)]
-/// struct AppContext {
+/// struct AppState {
 ///     http_client: reqwest::Client,
 /// }
 ///
-/// let app_ctx = AppContext { http_client: reqwest::Client::new() };
+/// let app_state = AppState { http_client: reqwest::Client::new() };
 /// let client = Durable::builder()
 ///     .database_url("postgres://localhost/myapp")
 ///     .queue_name("tasks")
-///     .build_with_context(app_ctx)
+///     .build_with_state(app_state)
 ///     .await?;
 ///
 /// client.register::<MyTask>().await;
 /// client.spawn::<MyTask>(params).await?;
 /// ```
-pub struct Durable<Ctx = ()>
+pub struct Durable<State = ()>
 where
-    Ctx: Clone + Send + Sync + 'static,
+    State: Clone + Send + Sync + 'static,
 {
     pool: PgPool,
     owns_pool: bool,
     queue_name: String,
     default_max_attempts: u32,
-    registry: Arc<RwLock<TaskRegistry<Ctx>>>,
-    context: Ctx,
+    registry: Arc<RwLock<TaskRegistry<State>>>,
+    state: State,
 }
 
 /// Builder for configuring a [`Durable`] client.
@@ -105,7 +105,7 @@ where
 /// # Example
 ///
 /// ```ignore
-/// // Without context
+/// // Without state
 /// let client = Durable::builder()
 ///     .database_url("postgres://localhost/myapp")
 ///     .queue_name("orders")
@@ -113,10 +113,10 @@ where
 ///     .build()
 ///     .await?;
 ///
-/// // With context
+/// // With state
 /// let client = Durable::builder()
 ///     .database_url("postgres://localhost/myapp")
-///     .build_with_context(my_app_context)
+///     .build_with_state(my_app_state)
 ///     .await?;
 /// ```
 pub struct DurableBuilder {
@@ -160,17 +160,17 @@ impl DurableBuilder {
         self
     }
 
-    /// Build the Durable client without application context.
+    /// Build the Durable client without application state.
     ///
     /// Use this when your tasks don't need access to shared resources
     /// like HTTP clients or database pools.
     pub async fn build(self) -> anyhow::Result<Durable<()>> {
-        self.build_with_context(()).await
+        self.build_with_state(()).await
     }
 
-    /// Build the Durable client with application context.
+    /// Build the Durable client with application state.
     ///
-    /// The context will be cloned and passed to each task execution.
+    /// The state will be cloned and passed to each task execution.
     /// Use this to provide shared resources like HTTP clients, database pools,
     /// or other application state to your tasks.
     ///
@@ -178,24 +178,24 @@ impl DurableBuilder {
     ///
     /// ```ignore
     /// #[derive(Clone)]
-    /// struct AppContext {
+    /// struct AppState {
     ///     http_client: reqwest::Client,
     ///     db_pool: PgPool,
     /// }
     ///
-    /// let ctx = AppContext {
+    /// let state = AppState {
     ///     http_client: reqwest::Client::new(),
     ///     db_pool: pool.clone(),
     /// };
     ///
     /// let client = Durable::builder()
     ///     .database_url("postgres://localhost/myapp")
-    ///     .build_with_context(ctx)
+    ///     .build_with_state(state)
     ///     .await?;
     /// ```
-    pub async fn build_with_context<Ctx>(self, context: Ctx) -> anyhow::Result<Durable<Ctx>>
+    pub async fn build_with_state<State>(self, state: State) -> anyhow::Result<Durable<State>>
     where
-        Ctx: Clone + Send + Sync + 'static,
+        State: Clone + Send + Sync + 'static,
     {
         let (pool, owns_pool) = if let Some(pool) = self.pool {
             (pool, false)
@@ -213,7 +213,7 @@ impl DurableBuilder {
             queue_name: self.queue_name,
             default_max_attempts: self.default_max_attempts,
             registry: Arc::new(RwLock::new(HashMap::new())),
-            context,
+            state,
         })
     }
 }
@@ -225,7 +225,7 @@ impl Default for DurableBuilder {
 }
 
 impl Durable<()> {
-    /// Create a new client with default settings (no application context).
+    /// Create a new client with default settings (no application state).
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
         DurableBuilder::new()
             .database_url(database_url)
@@ -239,9 +239,9 @@ impl Durable<()> {
     }
 }
 
-impl<Ctx> Durable<Ctx>
+impl<State> Durable<State>
 where
-    Ctx: Clone + Send + Sync + 'static,
+    State: Clone + Send + Sync + 'static,
 {
     /// Get a reference to the underlying connection pool
     pub fn pool(&self) -> &PgPool {
@@ -253,26 +253,29 @@ where
         &self.queue_name
     }
 
-    /// Get a reference to the application context
-    pub fn context(&self) -> &Ctx {
-        &self.context
+    /// Get a reference to the application state
+    pub fn state(&self) -> &State {
+        &self.state
     }
 
     /// Register a task type. Required before spawning or processing.
-    pub async fn register<T: Task<Ctx>>(&self) -> &Self {
+    pub async fn register<T: Task<State>>(&self) -> &Self {
         let mut registry = self.registry.write().await;
-        registry.insert(T::NAME.to_string(), Arc::new(TaskWrapper::<T, Ctx>::new()));
+        registry.insert(
+            T::NAME.to_string(),
+            Arc::new(TaskWrapper::<T, State>::new()),
+        );
         self
     }
 
     /// Spawn a task (type-safe version)
-    pub async fn spawn<T: Task<Ctx>>(&self, params: T::Params) -> anyhow::Result<SpawnResult> {
+    pub async fn spawn<T: Task<State>>(&self, params: T::Params) -> anyhow::Result<SpawnResult> {
         self.spawn_with_options::<T>(params, SpawnOptions::default())
             .await
     }
 
     /// Spawn a task with options (type-safe version)
-    pub async fn spawn_with_options<T: Task<Ctx>>(
+    pub async fn spawn_with_options<T: Task<State>>(
         &self,
         params: T::Params,
         options: SpawnOptions,
@@ -316,7 +319,7 @@ where
         params: T::Params,
     ) -> anyhow::Result<SpawnResult>
     where
-        T: Task<Ctx>,
+        T: Task<State>,
         E: Executor<'e, Database = Postgres>,
     {
         self.spawn_with_options_with::<T, E>(executor, params, SpawnOptions::default())
@@ -331,7 +334,7 @@ where
         options: SpawnOptions,
     ) -> anyhow::Result<SpawnResult>
     where
-        T: Task<Ctx>,
+        T: Task<State>,
         E: Executor<'e, Database = Postgres>,
     {
         self.spawn_by_name_with(executor, T::NAME, serde_json::to_value(&params)?, options)
@@ -453,7 +456,7 @@ where
             self.queue_name.clone(),
             self.registry.clone(),
             options,
-            self.context.clone(),
+            self.state.clone(),
         )
         .await
     }

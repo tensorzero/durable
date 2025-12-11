@@ -32,7 +32,7 @@ impl Task<()> for ResearchTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         // Phase 1: Find relevant sources (checkpointed)
         let sources: Vec<String> = ctx
@@ -84,11 +84,7 @@ impl Task<()> for EchoTask {
     type Params = EchoParams;
     type Output = String;
 
-    async fn run(
-        params: Self::Params,
-        _ctx: TaskContext,
-        _app_ctx: (),
-    ) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok(params.message)
     }
 }
@@ -112,11 +108,7 @@ impl Task<()> for FailingTask {
     type Params = FailingParams;
     type Output = ();
 
-    async fn run(
-        params: Self::Params,
-        _ctx: TaskContext,
-        _app_ctx: (),
-    ) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Err(TaskError::Failed(anyhow::anyhow!(
             "{}",
             params.error_message
@@ -148,7 +140,7 @@ impl Task<()> for MultiStepTask {
     async fn run(
         _params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         let step1: i32 = ctx.step("step1", || async { Ok(1) }).await?;
         let step2: i32 = ctx.step("step2", || async { Ok(2) }).await?;
@@ -183,7 +175,7 @@ impl Task<()> for SleepingTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         ctx.sleep_for("wait", std::time::Duration::from_secs(params.seconds))
             .await?;
@@ -214,7 +206,7 @@ impl Task<()> for EventWaitingTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         let timeout = params.timeout_seconds.map(std::time::Duration::from_secs);
         let payload: serde_json::Value = ctx.await_event(&params.event_name, timeout).await?;
@@ -263,7 +255,7 @@ impl Task<()> for StepCountingTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         // Each step returns a unique value that indicates it ran
         let step1_value: String = ctx
@@ -305,11 +297,7 @@ impl Task<()> for EmptyParamsTask {
     type Params = ();
     type Output = String;
 
-    async fn run(
-        _params: Self::Params,
-        _ctx: TaskContext,
-        _app_ctx: (),
-    ) -> TaskResult<Self::Output> {
+    async fn run(_params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok("completed".to_string())
     }
 }
@@ -333,7 +321,7 @@ impl Task<()> for HeartbeatTask {
     type Params = HeartbeatParams;
     type Output = u32;
 
-    async fn run(params: Self::Params, ctx: TaskContext, _app_ctx: ()) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         for _i in 0..params.iterations {
             // Simulate work
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -368,7 +356,7 @@ impl Task<()> for ConvenienceMethodsTask {
     async fn run(
         _params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         let rand_value = ctx.rand().await?;
         let now_value = ctx.now().await?;
@@ -407,7 +395,7 @@ impl Task<()> for MultipleConvenienceCallsTask {
     async fn run(
         _params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         let rand1 = ctx.rand().await?;
         let rand2 = ctx.rand().await?;
@@ -439,7 +427,7 @@ impl Task<()> for ReservedPrefixTask {
     async fn run(
         _params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         // This should fail because $ is reserved
         let _: String = ctx
@@ -469,11 +457,7 @@ impl Task<()> for DoubleTask {
     type Params = DoubleParams;
     type Output = i32;
 
-    async fn run(
-        params: Self::Params,
-        _ctx: TaskContext,
-        _app_ctx: (),
-    ) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok(params.value * 2)
     }
 }
@@ -488,11 +472,7 @@ impl Task<()> for FailingChildTask {
     type Params = ();
     type Output = ();
 
-    async fn run(
-        _params: Self::Params,
-        _ctx: TaskContext,
-        _app_ctx: (),
-    ) -> TaskResult<Self::Output> {
+    async fn run(_params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Err(TaskError::Failed(anyhow::anyhow!(
             "Child task failed intentionally"
         )))
@@ -528,7 +508,7 @@ impl Task<()> for SingleSpawnTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         // Spawn child task
         let handle: TaskHandle<i32> = ctx
@@ -573,7 +553,7 @@ impl Task<()> for MultiSpawnTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         // Spawn all children
         let mut handles = Vec::new();
@@ -612,7 +592,7 @@ impl Task<()> for SpawnFailingChildTask {
     async fn run(
         _params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         // Spawn with max_attempts=1 so child fails immediately without retries
         let handle: TaskHandle<()> = ctx
@@ -653,7 +633,7 @@ impl Task<()> for LongRunningHeartbeatTask {
     type Params = LongRunningHeartbeatParams;
     type Output = String;
 
-    async fn run(params: Self::Params, ctx: TaskContext, _app_ctx: ()) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         let start = std::time::Instant::now();
         let total_duration = std::time::Duration::from_millis(params.total_duration_ms);
         let heartbeat_interval = std::time::Duration::from_millis(params.heartbeat_interval_ms);
@@ -683,11 +663,7 @@ impl Task<()> for SlowChildTask {
     type Params = SlowChildParams;
     type Output = String;
 
-    async fn run(
-        params: Self::Params,
-        _ctx: TaskContext,
-        _app_ctx: (),
-    ) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         tokio::time::sleep(std::time::Duration::from_millis(params.sleep_ms)).await;
         Ok("done".to_string())
     }
@@ -712,7 +688,7 @@ impl Task<()> for SpawnSlowChildTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         // Spawn a slow child
         let handle: TaskHandle<String> = ctx
@@ -751,7 +727,7 @@ impl Task<()> for EventEmitterTask {
     type Params = EventEmitterParams;
     type Output = String;
 
-    async fn run(params: Self::Params, ctx: TaskContext, _app_ctx: ()) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         ctx.emit_event(&params.event_name, &params.payload).await?;
         Ok("emitted".to_string())
     }
@@ -779,7 +755,7 @@ impl Task<()> for ManyStepsTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         for i in 0..params.num_steps {
             let _: u32 = ctx
@@ -813,7 +789,7 @@ impl Task<()> for LargePayloadTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         // Create a large string of repeated characters
         let payload: String = ctx
@@ -846,11 +822,7 @@ impl Task<()> for CpuBoundTask {
     type Params = CpuBoundParams;
     type Output = String;
 
-    async fn run(
-        params: Self::Params,
-        _ctx: TaskContext,
-        _app_ctx: (),
-    ) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         let start = std::time::Instant::now();
         let duration = std::time::Duration::from_millis(params.duration_ms);
 
@@ -884,11 +856,7 @@ impl Task<()> for SlowNoHeartbeatTask {
     type Params = SlowNoHeartbeatParams;
     type Output = String;
 
-    async fn run(
-        params: Self::Params,
-        _ctx: TaskContext,
-        _app_ctx: (),
-    ) -> TaskResult<Self::Output> {
+    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         // Just sleep - no heartbeat calls
         tokio::time::sleep(std::time::Duration::from_millis(params.sleep_ms)).await;
         Ok("done".to_string())
@@ -954,7 +922,7 @@ impl Task<()> for CheckpointReplayTask {
     async fn run(
         _params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         let tracker = get_execution_tracker();
 
@@ -1041,7 +1009,7 @@ impl Task<()> for DeterministicReplayTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         let rand_value = ctx.rand().await?;
         let now_value = ctx.now().await?;
@@ -1103,7 +1071,7 @@ impl Task<()> for EventThenFailTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         // Wait for event (will be checkpointed)
         let payload: serde_json::Value = ctx.await_event(&params.event_name, None).await?;
@@ -1153,7 +1121,7 @@ impl Task<()> for EventThenDelayTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         // Wait for event (will be checkpointed)
         let payload: serde_json::Value = ctx.await_event(&params.event_name, None).await?;
@@ -1190,7 +1158,7 @@ impl Task<()> for MultiEventTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         let payload1: serde_json::Value = ctx.await_event(&params.event1_name, None).await?;
         let payload2: serde_json::Value = ctx.await_event(&params.event2_name, None).await?;
@@ -1233,7 +1201,7 @@ impl Task<()> for SpawnThenFailTask {
     async fn run(
         params: Self::Params,
         mut ctx: TaskContext,
-        _app_ctx: (),
+        _state: (),
     ) -> TaskResult<Self::Output> {
         use durable::SpawnOptions;
 
