@@ -41,7 +41,7 @@ durable = "0.1"
 ## Quick Start
 
 ```rust
-use durable::{Durable, Task, TaskContext, TaskResult, WorkerOptions, async_trait};
+use durable::{Durable, MIGRATOR, Task, TaskContext, TaskResult, WorkerOptions, async_trait};
 use serde::{Deserialize, Serialize};
 
 // Define your task parameters and output
@@ -100,6 +100,9 @@ async fn main() -> anyhow::Result<()> {
         .queue_name("research")
         .build()
         .await?;
+
+    // Run migrations (idempotent - safe to call on every startup)
+    MIGRATOR.run(client.pool()).await?;
 
     // Create the queue (idempotent - safe to call on every startup)
     client.create_queue(None).await?;
