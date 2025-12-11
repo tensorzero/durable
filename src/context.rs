@@ -3,6 +3,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -27,12 +28,20 @@ use crate::worker::LeaseExtender;
 /// - **Lease management** via [`heartbeat`](Self::heartbeat) - Extend the task lease
 ///   for long-running operations
 ///
+/// # Type Parameter
+///
+/// * `State` - The application state type. This allows [`spawn`](Self::spawn) to
+///   automatically infer the correct state type for child tasks.
+///
 /// # Public Fields
 ///
 /// - `task_id` - Unique identifier for this task (use as idempotency key)
 /// - `run_id` - Identifier for the current execution attempt
 /// - `attempt` - Current attempt number (starts at 1)
-pub struct TaskContext {
+pub struct TaskContext<State = ()>
+where
+    State: Clone + Send + Sync + 'static,
+{
     /// Unique identifier for this task. Use this as an idempotency key for
     /// external API calls to achieve "exactly-once" semantics.
     pub task_id: Uuid,
@@ -57,6 +66,9 @@ pub struct TaskContext {
 
     /// Notifies the worker when the lease is extended via step() or heartbeat().
     lease_extender: LeaseExtender,
+
+    /// Phantom data to carry the State type parameter.
+    _state: PhantomData<State>,
 }
 
 /// Validate that a user-provided step name doesn't use reserved prefix.
@@ -69,7 +81,10 @@ fn validate_user_name(name: &str) -> TaskResult<()> {
     Ok(())
 }
 
-impl TaskContext {
+impl<State> TaskContext<State>
+where
+    State: Clone + Send + Sync + 'static,
+{
     /// Create a new TaskContext. Called by the worker before executing a task.
     /// Loads all existing checkpoints into the cache.
     pub(crate) async fn create(
@@ -105,6 +120,7 @@ impl TaskContext {
             checkpoint_cache: cache,
             step_counters: HashMap::new(),
             lease_extender,
+            _state: PhantomData,
         })
     }
 
@@ -492,12 +508,15 @@ impl TaskContext {
             fields(task_id = %self.task_id, subtask_name = T::NAME)
         )
     )]
-    pub async fn spawn<T: Task>(
+    pub async fn spawn<T>(
         &mut self,
         name: &str,
         params: T::Params,
         options: crate::SpawnOptions,
-    ) -> TaskResult<TaskHandle<T::Output>> {
+    ) -> TaskResult<TaskHandle<T::Output>>
+    where
+        T: Task<State>,
+    {
         validate_user_name(name)?;
         let checkpoint_name = self.get_checkpoint_name(&format!("$spawn:{name}"));
 

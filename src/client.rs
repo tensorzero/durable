@@ -57,24 +57,47 @@ use crate::worker::Worker;
 /// - Emit events with [`emit_event`](Self::emit_event)
 /// - Cancel tasks with [`cancel_task`](Self::cancel_task)
 ///
+/// # Type Parameter
+///
+/// * `State` - Application state type passed to task handlers. Use `()` if you
+///   don't need any state. The state must implement `Clone + Send + Sync + 'static`.
+///
 /// # Example
 ///
 /// ```ignore
+/// // Without state (default)
 /// let client = Durable::builder()
 ///     .database_url("postgres://localhost/myapp")
 ///     .queue_name("tasks")
 ///     .build()
 ///     .await?;
 ///
+/// // With application state
+/// #[derive(Clone)]
+/// struct AppState {
+///     http_client: reqwest::Client,
+/// }
+///
+/// let app_state = AppState { http_client: reqwest::Client::new() };
+/// let client = Durable::builder()
+///     .database_url("postgres://localhost/myapp")
+///     .queue_name("tasks")
+///     .build_with_state(app_state)
+///     .await?;
+///
 /// client.register::<MyTask>().await;
 /// client.spawn::<MyTask>(params).await?;
 /// ```
-pub struct Durable {
+pub struct Durable<State = ()>
+where
+    State: Clone + Send + Sync + 'static,
+{
     pool: PgPool,
     owns_pool: bool,
     queue_name: String,
     default_max_attempts: u32,
-    registry: Arc<RwLock<TaskRegistry>>,
+    registry: Arc<RwLock<TaskRegistry<State>>>,
+    state: State,
 }
 
 /// Builder for configuring a [`Durable`] client.
@@ -82,11 +105,18 @@ pub struct Durable {
 /// # Example
 ///
 /// ```ignore
+/// // Without state
 /// let client = Durable::builder()
 ///     .database_url("postgres://localhost/myapp")
 ///     .queue_name("orders")
 ///     .default_max_attempts(3)
 ///     .build()
+///     .await?;
+///
+/// // With state
+/// let client = Durable::builder()
+///     .database_url("postgres://localhost/myapp")
+///     .build_with_state(my_app_state)
 ///     .await?;
 /// ```
 pub struct DurableBuilder {
@@ -130,8 +160,43 @@ impl DurableBuilder {
         self
     }
 
-    /// Build the Durable client
-    pub async fn build(self) -> anyhow::Result<Durable> {
+    /// Build the Durable client without application state.
+    ///
+    /// Use this when your tasks don't need access to shared resources
+    /// like HTTP clients or database pools.
+    pub async fn build(self) -> anyhow::Result<Durable<()>> {
+        self.build_with_state(()).await
+    }
+
+    /// Build the Durable client with application state.
+    ///
+    /// The state will be cloned and passed to each task execution.
+    /// Use this to provide shared resources like HTTP clients, database pools,
+    /// or other application state to your tasks.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// #[derive(Clone)]
+    /// struct AppState {
+    ///     http_client: reqwest::Client,
+    ///     db_pool: PgPool,
+    /// }
+    ///
+    /// let state = AppState {
+    ///     http_client: reqwest::Client::new(),
+    ///     db_pool: pool.clone(),
+    /// };
+    ///
+    /// let client = Durable::builder()
+    ///     .database_url("postgres://localhost/myapp")
+    ///     .build_with_state(state)
+    ///     .await?;
+    /// ```
+    pub async fn build_with_state<State>(self, state: State) -> anyhow::Result<Durable<State>>
+    where
+        State: Clone + Send + Sync + 'static,
+    {
         let (pool, owns_pool) = if let Some(pool) = self.pool {
             (pool, false)
         } else {
@@ -148,6 +213,7 @@ impl DurableBuilder {
             queue_name: self.queue_name,
             default_max_attempts: self.default_max_attempts,
             registry: Arc::new(RwLock::new(HashMap::new())),
+            state,
         })
     }
 }
@@ -158,8 +224,8 @@ impl Default for DurableBuilder {
     }
 }
 
-impl Durable {
-    /// Create a new client with default settings
+impl Durable<()> {
+    /// Create a new client with default settings (no application state).
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
         DurableBuilder::new()
             .database_url(database_url)
@@ -171,7 +237,12 @@ impl Durable {
     pub fn builder() -> DurableBuilder {
         DurableBuilder::new()
     }
+}
 
+impl<State> Durable<State>
+where
+    State: Clone + Send + Sync + 'static,
+{
     /// Get a reference to the underlying connection pool
     pub fn pool(&self) -> &PgPool {
         &self.pool
@@ -182,21 +253,29 @@ impl Durable {
         &self.queue_name
     }
 
+    /// Get a reference to the application state
+    pub fn state(&self) -> &State {
+        &self.state
+    }
+
     /// Register a task type. Required before spawning or processing.
-    pub async fn register<T: Task>(&self) -> &Self {
+    pub async fn register<T: Task<State>>(&self) -> &Self {
         let mut registry = self.registry.write().await;
-        registry.insert(T::NAME.to_string(), Arc::new(TaskWrapper::<T>::new()));
+        registry.insert(
+            T::NAME.to_string(),
+            Arc::new(TaskWrapper::<T, State>::new()),
+        );
         self
     }
 
     /// Spawn a task (type-safe version)
-    pub async fn spawn<T: Task>(&self, params: T::Params) -> anyhow::Result<SpawnResult> {
+    pub async fn spawn<T: Task<State>>(&self, params: T::Params) -> anyhow::Result<SpawnResult> {
         self.spawn_with_options::<T>(params, SpawnOptions::default())
             .await
     }
 
     /// Spawn a task with options (type-safe version)
-    pub async fn spawn_with_options<T: Task>(
+    pub async fn spawn_with_options<T: Task<State>>(
         &self,
         params: T::Params,
         options: SpawnOptions,
@@ -240,7 +319,7 @@ impl Durable {
         params: T::Params,
     ) -> anyhow::Result<SpawnResult>
     where
-        T: Task,
+        T: Task<State>,
         E: Executor<'e, Database = Postgres>,
     {
         self.spawn_with_options_with::<T, E>(executor, params, SpawnOptions::default())
@@ -255,7 +334,7 @@ impl Durable {
         options: SpawnOptions,
     ) -> anyhow::Result<SpawnResult>
     where
-        T: Task,
+        T: Task<State>,
         E: Executor<'e, Database = Postgres>,
     {
         self.spawn_by_name_with(executor, T::NAME, serde_json::to_value(&params)?, options)
@@ -414,6 +493,7 @@ impl Durable {
             self.queue_name.clone(),
             self.registry.clone(),
             options,
+            self.state.clone(),
         )
         .await
     }

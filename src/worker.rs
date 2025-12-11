@@ -54,12 +54,16 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub(crate) async fn start(
+    pub(crate) async fn start<State>(
         pool: PgPool,
         queue_name: String,
-        registry: Arc<RwLock<TaskRegistry>>,
+        registry: Arc<RwLock<TaskRegistry<State>>>,
         options: WorkerOptions,
-    ) -> Self {
+        state: State,
+    ) -> Self
+    where
+        State: Clone + Send + Sync + 'static,
+    {
         let (shutdown_tx, _) = broadcast::channel(1);
         let shutdown_rx = shutdown_tx.subscribe();
 
@@ -80,6 +84,7 @@ impl Worker {
             options,
             worker_id,
             shutdown_rx,
+            state,
         ));
 
         Self {
@@ -97,14 +102,17 @@ impl Worker {
         let _ = self.handle.await;
     }
 
-    async fn run_loop(
+    async fn run_loop<State>(
         pool: PgPool,
         queue_name: String,
-        registry: Arc<RwLock<TaskRegistry>>,
+        registry: Arc<RwLock<TaskRegistry<State>>>,
         options: WorkerOptions,
         worker_id: String,
         mut shutdown_rx: broadcast::Receiver<()>,
-    ) {
+        state: State,
+    ) where
+        State: Clone + Send + Sync + 'static,
+    {
         let concurrency = options.concurrency;
         let batch_size = options.batch_size.unwrap_or(concurrency);
         let claim_timeout = options.claim_timeout;
@@ -174,6 +182,7 @@ impl Worker {
                         let queue_name = queue_name.clone();
                         let registry = registry.clone();
                         let done_tx = done_tx.clone();
+                        let state = state.clone();
 
                         tokio::spawn(async move {
                             Self::execute_task(
@@ -183,6 +192,7 @@ impl Worker {
                                 task,
                                 claim_timeout,
                                 fatal_on_lease_timeout,
+                                state,
                             ).await;
 
                             drop(permit);
@@ -241,14 +251,17 @@ impl Worker {
         Ok(tasks)
     }
 
-    async fn execute_task(
+    async fn execute_task<State>(
         pool: PgPool,
         queue_name: String,
-        registry: Arc<RwLock<TaskRegistry>>,
+        registry: Arc<RwLock<TaskRegistry<State>>>,
         task: ClaimedTask,
         claim_timeout: u64,
         fatal_on_lease_timeout: bool,
-    ) {
+        state: State,
+    ) where
+        State: Clone + Send + Sync + 'static,
+    {
         // Create span for task execution, linked to parent trace context if available
         let span = tracing::info_span!(
             "durable.worker.execute_task",
@@ -274,19 +287,23 @@ impl Worker {
             task,
             claim_timeout,
             fatal_on_lease_timeout,
+            state,
         )
         .instrument(span)
         .await
     }
 
-    async fn execute_task_inner(
+    async fn execute_task_inner<State>(
         pool: PgPool,
         queue_name: String,
-        registry: Arc<RwLock<TaskRegistry>>,
+        registry: Arc<RwLock<TaskRegistry<State>>>,
         task: ClaimedTask,
         claim_timeout: u64,
         fatal_on_lease_timeout: bool,
-    ) {
+        state: State,
+    ) where
+        State: Clone + Send + Sync + 'static,
+    {
         let task_label = format!("{} ({})", task.task_name, task.task_id);
         let task_id = task.task_id;
         let run_id = task.run_id;
@@ -339,7 +356,7 @@ impl Worker {
         // Execute task with timeout enforcement
         let task_handle = tokio::spawn({
             let params = task.params.clone();
-            async move { handler.execute(params, ctx).await }
+            async move { handler.execute(params, ctx, state).await }
         });
         let abort_handle = task_handle.abort_handle();
 
@@ -353,47 +370,31 @@ impl Worker {
                 let mut fatal_duration = warn_duration * 2;
                 let mut warn_fired = false;
                 let mut deadline = Instant::now();
-                let mut channel_open = true;
 
                 loop {
                     let warn_at = deadline + warn_duration;
                     let fatal_at = deadline + fatal_duration;
 
-                    // If channel is closed, just wait for timeout without checking channel
-                    if !channel_open {
-                        tokio::select! {
-                            _ = sleep_until(warn_at), if !warn_fired => {
-                                tracing::warn!(
-                                    "Task {} exceeded claim timeout of {}s (no heartbeat/step since last extension)",
-                                    task_label,
-                                    claim_timeout
-                                );
-                                warn_fired = true;
-                            }
-
-                            _ = sleep_until(fatal_at) => {
-                                // Fatal timeout reached
-                                return;
-                            }
+                    let channel_fut = async {
+                        if lease_rx.is_closed() && lease_rx.is_empty() {
+                            // Wait forever, so that we'll hit one of the timeout branches
+                            // in the `tokio::select!` below.
+                            futures::future::pending().await
+                        } else {
+                            lease_rx.recv().await
                         }
-                        continue;
-                    }
+                    };
 
                     tokio::select! {
                         biased; // Check channel first to prioritize resets
 
-                        msg = lease_rx.recv() => {
+                        msg = channel_fut => {
                             if let Some(extension) = msg {
                                 // Lease extended - reset deadline and warning state
                                 warn_duration = extension;
                                 fatal_duration = extension * 2;
                                 deadline = Instant::now();
                                 warn_fired = false;
-                            } else {
-                                // Channel closed - task might be finishing, but keep timing
-                                // in case it's actually stuck. The outer select will abort
-                                // us when task completes normally.
-                                channel_open = false;
                             }
                         }
 
