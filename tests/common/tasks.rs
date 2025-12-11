@@ -1241,3 +1241,51 @@ impl Task<()> for SpawnThenFailTask {
         }))
     }
 }
+
+// ============================================================================
+// SpawnByNameTask - Tests spawn_by_name on TaskContext
+// ============================================================================
+
+/// Parent task that spawns a child using spawn_by_name (dynamic version)
+#[allow(dead_code)]
+pub struct SpawnByNameTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnByNameParams {
+    pub child_value: i32,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnByNameOutput {
+    pub child_result: i32,
+}
+
+#[async_trait]
+impl Task<()> for SpawnByNameTask {
+    const NAME: &'static str = "spawn-by-name";
+    type Params = SpawnByNameParams;
+    type Output = SpawnByNameOutput;
+
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
+        // Spawn child task using spawn_by_name (dynamic version)
+        let handle: TaskHandle<i32> = ctx
+            .spawn_by_name(
+                "child",
+                "double", // task name string instead of type
+                serde_json::json!({ "value": params.child_value }),
+                Default::default(),
+            )
+            .await?;
+
+        // Join and get result
+        let child_result: i32 = ctx.join("child", handle).await?;
+
+        Ok(SpawnByNameOutput { child_result })
+    }
+}
