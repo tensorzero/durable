@@ -47,6 +47,21 @@ impl CancellationPolicyDb {
 
 use crate::worker::Worker;
 
+/// Validates that user-provided headers don't use reserved prefixes.
+fn validate_headers(headers: &Option<HashMap<String, JsonValue>>) -> anyhow::Result<()> {
+    if let Some(headers) = headers {
+        for key in headers.keys() {
+            if key.starts_with("durable::") {
+                anyhow::bail!(
+                    "Header key '{}' uses reserved prefix 'durable::'. User headers cannot start with 'durable::'.",
+                    key
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The main client for interacting with durable workflows.
 ///
 /// Use this client to:
@@ -361,6 +376,9 @@ where
     where
         E: Executor<'e, Database = Postgres>,
     {
+        // Validate user headers don't use reserved prefix
+        validate_headers(&options.headers)?;
+
         // Inject trace context into headers for distributed tracing
         #[cfg(feature = "telemetry")]
         {

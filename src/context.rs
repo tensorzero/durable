@@ -518,6 +518,19 @@ where
         T: Task<State>,
     {
         validate_user_name(name)?;
+
+        // Validate headers don't use reserved prefix
+        if let Some(ref headers) = options.headers {
+            for key in headers.keys() {
+                if key.starts_with("durable::") {
+                    return Err(TaskError::Failed(anyhow::anyhow!(
+                        "Header key '{}' uses reserved prefix 'durable::'. User headers cannot start with 'durable::'.",
+                        key
+                    )));
+                }
+            }
+        }
+
         let checkpoint_name = self.get_checkpoint_name(&format!("$spawn:{name}"));
 
         // Return cached task_id if already spawned
