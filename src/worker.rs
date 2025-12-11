@@ -247,6 +247,7 @@ impl Worker {
             task.clone(),
             claim_timeout,
             lease_extender,
+            registry.clone(),
         )
         .await
         {
