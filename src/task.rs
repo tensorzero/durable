@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value as JsonValue;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::context::TaskContext;
@@ -110,34 +111,8 @@ where
     ) -> Result<JsonValue, TaskError>;
 }
 
-/// Wrapper that implements ErasedTask for any Task type
-pub struct TaskWrapper<T, State>(std::marker::PhantomData<(T, State)>)
-where
-    T: Task<State>,
-    State: Clone + Send + Sync + 'static;
-
-impl<T, State> TaskWrapper<T, State>
-where
-    T: Task<State>,
-    State: Clone + Send + Sync + 'static,
-{
-    pub fn new() -> Self {
-        Self(std::marker::PhantomData)
-    }
-}
-
-impl<T, State> Default for TaskWrapper<T, State>
-where
-    T: Task<State>,
-    State: Clone + Send + Sync + 'static,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[async_trait]
-impl<T, State> ErasedTask<State> for TaskWrapper<T, State>
+impl<T, State> ErasedTask<State> for PhantomData<T>
 where
     T: Task<State>,
     State: Clone + Send + Sync + 'static,
