@@ -294,47 +294,31 @@ impl Worker {
                 let mut fatal_duration = warn_duration * 2;
                 let mut warn_fired = false;
                 let mut deadline = Instant::now();
-                let mut channel_open = true;
 
                 loop {
                     let warn_at = deadline + warn_duration;
                     let fatal_at = deadline + fatal_duration;
 
-                    // If channel is closed, just wait for timeout without checking channel
-                    if !channel_open {
-                        tokio::select! {
-                            _ = sleep_until(warn_at), if !warn_fired => {
-                                tracing::warn!(
-                                    "Task {} exceeded claim timeout of {}s (no heartbeat/step since last extension)",
-                                    task_label,
-                                    claim_timeout
-                                );
-                                warn_fired = true;
-                            }
-
-                            _ = sleep_until(fatal_at) => {
-                                // Fatal timeout reached
-                                return;
-                            }
+                    let channel_fut = async {
+                        if lease_rx.is_closed() && lease_rx.is_empty() {
+                            // Wait forever, so that we'll hit one of the timeout branches
+                            // in the `tokio::select!` below.
+                            futures::future::pending().await
+                        } else {
+                            lease_rx.recv().await
                         }
-                        continue;
-                    }
+                    };
 
                     tokio::select! {
                         biased; // Check channel first to prioritize resets
 
-                        msg = lease_rx.recv() => {
+                        msg = channel_fut => {
                             if let Some(extension) = msg {
                                 // Lease extended - reset deadline and warning state
                                 warn_duration = extension;
                                 fatal_duration = extension * 2;
                                 deadline = Instant::now();
                                 warn_fired = false;
-                            } else {
-                                // Channel closed - task might be finishing, but keep timing
-                                // in case it's actually stuck. The outer select will abort
-                                // us when task completes normally.
-                                channel_open = false;
                             }
                         }
 
