@@ -668,7 +668,7 @@ impl durable::Task<AppState> for WriteToDbTask {
 
     async fn run(
         params: Self::Params,
-        mut ctx: durable::TaskContext,
+        mut ctx: durable::TaskContext<AppState>,
         state: AppState,
     ) -> durable::TaskResult<Self::Output> {
         // Use the app state's db pool to write to a table

@@ -86,7 +86,11 @@ where
     ///
     /// The `state` parameter provides access to application-level resources
     /// like HTTP clients, database pools, etc.
-    async fn run(params: Self::Params, ctx: TaskContext, state: State) -> TaskResult<Self::Output>;
+    async fn run(
+        params: Self::Params,
+        ctx: TaskContext<State>,
+        state: State,
+    ) -> TaskResult<Self::Output>;
 }
 
 /// Internal trait for storing heterogeneous tasks in a HashMap.
@@ -101,7 +105,7 @@ where
     async fn execute(
         &self,
         params: JsonValue,
-        ctx: TaskContext,
+        ctx: TaskContext<State>,
         state: State,
     ) -> Result<JsonValue, TaskError>;
 }
@@ -145,7 +149,7 @@ where
     async fn execute(
         &self,
         params: JsonValue,
-        ctx: TaskContext,
+        ctx: TaskContext<State>,
         state: State,
     ) -> Result<JsonValue, TaskError> {
         let typed_params: T::Params = serde_json::from_value(params)?;

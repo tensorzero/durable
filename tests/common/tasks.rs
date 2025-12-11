@@ -512,7 +512,7 @@ impl Task<()> for SingleSpawnTask {
     ) -> TaskResult<Self::Output> {
         // Spawn child task
         let handle: TaskHandle<i32> = ctx
-            .spawn::<DoubleTask, ()>(
+            .spawn::<DoubleTask>(
                 "child",
                 DoubleParams {
                     value: params.child_value,
@@ -559,7 +559,7 @@ impl Task<()> for MultiSpawnTask {
         let mut handles = Vec::new();
         for (i, value) in params.values.iter().enumerate() {
             let handle: TaskHandle<i32> = ctx
-                .spawn::<DoubleTask, ()>(
+                .spawn::<DoubleTask>(
                     &format!("child-{i}"),
                     DoubleParams { value: *value },
                     Default::default(),
@@ -596,7 +596,7 @@ impl Task<()> for SpawnFailingChildTask {
     ) -> TaskResult<Self::Output> {
         // Spawn with max_attempts=1 so child fails immediately without retries
         let handle: TaskHandle<()> = ctx
-            .spawn::<FailingChildTask, ()>(
+            .spawn::<FailingChildTask>(
                 "child",
                 (),
                 SpawnOptions {
@@ -692,7 +692,7 @@ impl Task<()> for SpawnSlowChildTask {
     ) -> TaskResult<Self::Output> {
         // Spawn a slow child
         let handle: TaskHandle<String> = ctx
-            .spawn::<SlowChildTask, ()>(
+            .spawn::<SlowChildTask>(
                 "slow-child",
                 SlowChildParams {
                     sleep_ms: params.child_sleep_ms,
@@ -1207,7 +1207,7 @@ impl Task<()> for SpawnThenFailTask {
 
         // Spawn child (should be idempotent)
         let child_handle = ctx
-            .spawn::<ManyStepsTask, ()>(
+            .spawn::<ManyStepsTask>(
                 "child",
                 ManyStepsParams {
                     num_steps: params.child_steps,
