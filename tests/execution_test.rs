@@ -640,3 +640,133 @@ async fn test_long_running_task_with_heartbeat_completes(pool: PgPool) -> sqlx::
 
     Ok(())
 }
+
+// ============================================================================
+// Application State Tests
+// ============================================================================
+
+/// Application state that holds a database pool for tasks to use.
+#[derive(Clone)]
+struct AppState {
+    db_pool: PgPool,
+}
+
+/// A task that uses the application state to write to a database table.
+struct WriteToDbTask;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct WriteToDbParams {
+    key: String,
+    value: String,
+}
+
+#[durable::async_trait]
+impl durable::Task<AppState> for WriteToDbTask {
+    const NAME: &'static str = "write-to-db";
+    type Params = WriteToDbParams;
+    type Output = i64;
+
+    async fn run(
+        params: Self::Params,
+        mut ctx: durable::TaskContext<AppState>,
+        state: AppState,
+    ) -> durable::TaskResult<Self::Output> {
+        // Use the app state's db pool to write to a table
+        let row_id: i64 = ctx
+            .step("insert", || async {
+                let (id,): (i64,) = sqlx::query_as(
+                    "INSERT INTO test_state_table (key, value) VALUES ($1, $2) RETURNING id",
+                )
+                .bind(&params.key)
+                .bind(&params.value)
+                .fetch_one(&state.db_pool)
+                .await
+                .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+                Ok(id)
+            })
+            .await?;
+
+        Ok(row_id)
+    }
+}
+
+/// Helper to create a Durable client with application state.
+async fn create_client_with_state(pool: PgPool, queue_name: &str) -> durable::Durable<AppState> {
+    let app_state = AppState {
+        db_pool: pool.clone(),
+    };
+    durable::Durable::builder()
+        .pool(pool)
+        .queue_name(queue_name)
+        .build_with_state(app_state)
+        .await
+        .expect("Failed to create Durable client with state")
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_task_uses_application_state(pool: PgPool) -> sqlx::Result<()> {
+    // Create a test table for the task to write to
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS test_state_table (
+            id BIGSERIAL PRIMARY KEY,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL
+        )",
+    )
+    .execute(&pool)
+    .await?;
+
+    // Create client with application state
+    let client = create_client_with_state(pool.clone(), "exec_state").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<WriteToDbTask>().await;
+
+    // Spawn a task that will use the state to write to the database
+    let spawn_result = client
+        .spawn::<WriteToDbTask>(WriteToDbParams {
+            key: "test_key".to_string(),
+            value: "test_value".to_string(),
+        })
+        .await
+        .expect("Failed to spawn task");
+
+    // Start worker
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            ..Default::default()
+        })
+        .await;
+
+    // Wait for task to complete
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    worker.shutdown().await;
+
+    // Verify task completed
+    let task_state = get_task_state(&pool, "exec_state", spawn_result.task_id).await;
+    assert_eq!(task_state, "completed", "Task should complete successfully");
+
+    // Verify the task actually wrote to the database using the state
+    let (key, value): (String, String) =
+        sqlx::query_as("SELECT key, value FROM test_state_table WHERE key = 'test_key'")
+            .fetch_one(&pool)
+            .await?;
+
+    assert_eq!(key, "test_key");
+    assert_eq!(value, "test_value");
+
+    // Verify the task returned the row ID
+    let result = get_task_result(&pool, "exec_state", spawn_result.task_id)
+        .await
+        .expect("Task should have a result");
+    let row_id: i64 = serde_json::from_value(result).expect("Result should be i64");
+    assert!(row_id > 0, "Row ID should be positive");
+
+    // Cleanup
+    sqlx::query("DROP TABLE test_state_table")
+        .execute(&pool)
+        .await?;
+
+    Ok(())
+}
