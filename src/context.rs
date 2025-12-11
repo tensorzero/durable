@@ -463,43 +463,9 @@ where
     where
         T: Task<State>,
     {
-        validate_user_name(name)?;
-        let checkpoint_name = self.get_checkpoint_name(&format!("$spawn:{name}"));
-
-        // Return cached task_id if already spawned
-        if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
-            let task_id: Uuid = serde_json::from_value(cached.clone())?;
-            return Ok(TaskHandle::new(task_id));
-        }
-
-        // Build options JSON, merging user options with parent_task_id
         let params_json = serde_json::to_value(&params)?;
-        #[derive(Serialize)]
-        struct SubtaskOptions<'a> {
-            parent_task_id: Uuid,
-            #[serde(flatten)]
-            options: &'a SpawnOptions,
-        }
-        let options_json = serde_json::to_value(SubtaskOptions {
-            parent_task_id: self.task_id,
-            options: &options,
-        })?;
-
-        let row: SpawnResultRow = sqlx::query_as(
-            "SELECT task_id, run_id, attempt FROM durable.spawn_task($1, $2, $3, $4)",
-        )
-        .bind(&self.queue_name)
-        .bind(T::NAME)
-        .bind(&params_json)
-        .bind(&options_json)
-        .fetch_one(&self.pool)
-        .await?;
-
-        // Checkpoint the spawn
-        self.persist_checkpoint(&checkpoint_name, &row.task_id)
-            .await?;
-
-        Ok(TaskHandle::new(row.task_id))
+        self.spawn_by_name(name, T::NAME, params_json, options)
+            .await
     }
 
     /// Spawn a subtask by task name (dynamic version).
