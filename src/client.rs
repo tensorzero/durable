@@ -48,6 +48,21 @@ impl CancellationPolicyDb {
 
 use crate::worker::Worker;
 
+/// Validates that user-provided headers don't use reserved prefixes.
+fn validate_headers(headers: &Option<HashMap<String, JsonValue>>) -> anyhow::Result<()> {
+    if let Some(headers) = headers {
+        for key in headers.keys() {
+            if key.starts_with("durable::") {
+                anyhow::bail!(
+                    "Header key '{}' uses reserved prefix 'durable::'. User headers cannot start with 'durable::'.",
+                    key
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The main client for interacting with durable workflows.
 ///
 /// Use this client to:
@@ -355,6 +370,14 @@ where
     /// Spawn a task by name using a custom executor.
     ///
     /// The task must be registered before spawning.
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.client.spawn",
+            skip(self, executor, params, options),
+            fields(queue, task_name = %task_name)
+        )
+    )]
     pub async fn spawn_by_name_with<'e, E>(
         &self,
         executor: E,
@@ -380,16 +403,30 @@ where
     }
 
     /// Internal spawn implementation without registry validation.
+    #[allow(unused_mut)] // mut is needed when telemetry feature is enabled
     async fn spawn_by_name_internal<'e, E>(
         &self,
         executor: E,
         task_name: &str,
         params: JsonValue,
-        options: SpawnOptions,
+        mut options: SpawnOptions,
     ) -> anyhow::Result<SpawnResult>
     where
         E: Executor<'e, Database = Postgres>,
     {
+        // Validate user headers don't use reserved prefix
+        validate_headers(&options.headers)?;
+
+        // Inject trace context into headers for distributed tracing
+        #[cfg(feature = "telemetry")]
+        {
+            let headers = options.headers.get_or_insert_with(HashMap::new);
+            crate::telemetry::inject_trace_context(headers);
+        }
+
+        #[cfg(feature = "telemetry")]
+        tracing::Span::current().record("queue", &self.queue_name);
+
         let max_attempts = options.max_attempts.unwrap_or(self.default_max_attempts);
 
         let db_options = Self::serialize_spawn_options(&options, max_attempts)?;
@@ -404,6 +441,9 @@ where
             .bind(&db_options)
             .fetch_one(executor)
             .await?;
+
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::record_task_spawned(&self.queue_name, task_name);
 
         Ok(SpawnResult {
             task_id: row.task_id,
@@ -452,6 +492,14 @@ where
     }
 
     /// Emit an event to a queue (defaults to this client's queue)
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.client.emit_event",
+            skip(self, payload),
+            fields(queue, event_name = %event_name)
+        )
+    )]
     pub async fn emit_event<T: Serialize>(
         &self,
         event_name: &str,
@@ -461,6 +509,10 @@ where
         anyhow::ensure!(!event_name.is_empty(), "event_name must be non-empty");
 
         let queue = queue_name.unwrap_or(&self.queue_name);
+
+        #[cfg(feature = "telemetry")]
+        tracing::Span::current().record("queue", queue);
+
         let payload_json = serde_json::to_value(payload)?;
 
         let query = "SELECT durable.emit_event($1, $2, $3)";
@@ -470,6 +522,9 @@ where
             .bind(&payload_json)
             .execute(&self.pool)
             .await?;
+
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::record_event_emitted(queue, event_name);
 
         Ok(())
     }
