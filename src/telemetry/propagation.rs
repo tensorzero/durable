@@ -10,7 +10,7 @@
 //! as a serialized JSON object containing the W3C headers.
 
 use opentelemetry::Context;
-use opentelemetry::propagation::{Extractor, Injector, TextMapPropagator};
+use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -18,28 +18,6 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Key used to store OTEL context in the headers map
 const OTEL_CONTEXT_KEY: &str = "durable::otel_context";
-
-/// Wrapper to implement `Injector` for HashMap<String, String>
-struct HashMapInjector<'a>(&'a mut HashMap<String, String>);
-
-impl Injector for HashMapInjector<'_> {
-    fn set(&mut self, key: &str, value: String) {
-        self.0.insert(key.to_string(), value);
-    }
-}
-
-/// Wrapper to implement `Extractor` for HashMap<String, String>
-struct HashMapExtractor<'a>(&'a HashMap<String, String>);
-
-impl Extractor for HashMapExtractor<'_> {
-    fn get(&self, key: &str) -> Option<&str> {
-        self.0.get(key).map(|s| s.as_str())
-    }
-
-    fn keys(&self) -> Vec<&str> {
-        self.0.keys().map(|k| k.as_str()).collect()
-    }
-}
 
 /// Inject the current span's trace context into a headers map.
 ///
@@ -58,9 +36,8 @@ pub fn inject_trace_context(headers: &mut HashMap<String, JsonValue>) {
     let cx = tracing::Span::current().context();
 
     // Inject into a temporary HashMap<String, String>
-    let mut otel_headers = HashMap::new();
-    let mut injector = HashMapInjector(&mut otel_headers);
-    propagator.inject_context(&cx, &mut injector);
+    let mut otel_headers: HashMap<String, String> = HashMap::new();
+    propagator.inject_context(&cx, &mut otel_headers);
 
     // Only store if there's actual context to propagate
     if !otel_headers.is_empty()
@@ -91,8 +68,7 @@ pub fn extract_trace_context(headers: &HashMap<String, JsonValue>) -> Context {
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 
-    let extractor = HashMapExtractor(&otel_headers);
-    propagator.extract(&extractor)
+    propagator.extract(&otel_headers)
 }
 
 /// Check if headers contain trace context.
@@ -130,18 +106,5 @@ mod tests {
         let json_value = serde_json::to_value(otel_context).unwrap();
         headers.insert(OTEL_CONTEXT_KEY.to_string(), json_value);
         assert!(has_trace_context(&headers));
-    }
-
-    #[test]
-    fn test_extractor_keys() {
-        let mut headers = HashMap::new();
-        headers.insert("key1".to_string(), "value1".to_string());
-        headers.insert("key2".to_string(), "value2".to_string());
-
-        let extractor = HashMapExtractor(&headers);
-        let keys = extractor.keys();
-        assert_eq!(keys.len(), 2);
-        assert!(keys.contains(&"key1"));
-        assert!(keys.contains(&"key2"));
     }
 }
