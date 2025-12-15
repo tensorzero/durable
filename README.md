@@ -68,7 +68,7 @@ impl Task for ResearchTask {
     async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
         // Phase 1: Find relevant sources (checkpointed)
         // If the task crashes after this step, it won't re-run on retry
-        let sources: Vec<String> = ctx.step("find-sources", || async {
+        let sources: Vec<String> = ctx.step("find-sources", (), |_, _| async {
             // Search logic here...
             Ok(vec![
                 "https://example.com/article1".into(),
@@ -77,13 +77,13 @@ impl Task for ResearchTask {
         }).await?;
 
         // Phase 2: Analyze the sources (checkpointed)
-        let analysis: String = ctx.step("analyze", || async {
+        let analysis: String = ctx.step("analyze", (), |_, _| async {
             // Analysis logic here...
             Ok("Key findings from sources...".into())
         }).await?;
 
         // Phase 3: Generate summary (checkpointed)
-        let summary: String = ctx.step("summarize", || async {
+        let summary: String = ctx.step("summarize", params, |params, _| async {
             // Summarization logic here...
             Ok(format!("Research summary for '{}': {}", params.query, analysis))
         }).await?;
@@ -158,8 +158,8 @@ The [`TaskContext`] provides methods for durable execution:
 Steps provide "at-least-once" execution. To achieve "exactly-once" semantics for side effects, use the `task_id` as an idempotency key:
 
 ```rust
-ctx.step("charge-payment", || async {
-    let idempotency_key = format!("{}:charge", ctx.task_id);
+ctx.step("charge-payment", ctx.task_id, |task_id, state| async {
+    let idempotency_key = format!("{}:charge", task_id);
     stripe::charge(amount, &idempotency_key).await
 }).await?;
 ```
@@ -197,7 +197,7 @@ async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Out
     }).await?;
 
     // Do local work while subtasks run...
-    let local = ctx.step("local-work", || async { Ok(compute()) }).await?;
+    let local = ctx.step("local-work", (), |_params, _state| async { Ok(compute()) }).await?;
 
     // Wait for subtask results
     let r1: ItemResult = ctx.join("item-1", h1).await?;
