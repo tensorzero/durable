@@ -69,7 +69,7 @@ impl Task<()> for MultiStepBenchTask {
     ) -> TaskResult<Self::Output> {
         for i in 0..params.num_steps {
             let _: u32 = ctx
-                .step(&format!("step-{}", i), || async move { Ok(i) })
+                .step(&format!("step-{}", i), i, |i, _| async move { Ok(i) })
                 .await?;
         }
         Ok(params.num_steps)
@@ -102,7 +102,11 @@ impl Task<()> for LargePayloadBenchTask {
     ) -> TaskResult<Self::Output> {
         let payload = "x".repeat(params.payload_size);
         let _: String = ctx
-            .step("large-step", || async move { Ok(payload) })
+            .step(
+                "large-step",
+                payload,
+                |payload, _| async move { Ok(payload) },
+            )
             .await?;
         Ok(params.payload_size)
     }
