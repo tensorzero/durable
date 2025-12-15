@@ -487,3 +487,75 @@ async fn test_spawn_with_transaction_rollback(pool: PgPool) -> sqlx::Result<()> 
 
     Ok(())
 }
+
+// ============================================================================
+// Reserved Header Prefix Validation Tests
+// ============================================================================
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_spawn_rejects_reserved_header_prefix(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "reserved_headers").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<EchoTask>().await;
+
+    let mut headers = HashMap::new();
+    headers.insert("durable::custom".to_string(), serde_json::json!("value"));
+
+    let options = SpawnOptions {
+        headers: Some(headers),
+        ..Default::default()
+    };
+
+    let result = client
+        .spawn_with_options::<EchoTask>(
+            EchoParams {
+                message: "test".to_string(),
+            },
+            options,
+        )
+        .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("reserved prefix 'durable::'"),
+        "Error should mention reserved prefix, got: {}",
+        err
+    );
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_spawn_allows_non_reserved_headers(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "allowed_headers").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<EchoTask>().await;
+
+    let mut headers = HashMap::new();
+    // These should all be allowed - they don't start with "durable::"
+    headers.insert("my-header".to_string(), serde_json::json!("value"));
+    headers.insert("durable".to_string(), serde_json::json!("no colons"));
+    headers.insert("durable:single".to_string(), serde_json::json!("one colon"));
+
+    let options = SpawnOptions {
+        headers: Some(headers),
+        ..Default::default()
+    };
+
+    let result = client
+        .spawn_with_options::<EchoTask>(
+            EchoParams {
+                message: "test".to_string(),
+            },
+            options,
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "Headers without 'durable::' prefix should be allowed"
+    );
+
+    Ok(())
+}

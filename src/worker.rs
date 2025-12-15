@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{RwLock, Semaphore, broadcast, mpsc};
 use tokio::time::{Instant, sleep, sleep_until};
+use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::context::TaskContext;
@@ -125,6 +126,10 @@ impl Worker {
         let poll_interval = std::time::Duration::from_secs_f64(options.poll_interval);
         let fatal_on_lease_timeout = options.fatal_on_lease_timeout;
 
+        // Mark worker as active
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::set_worker_active(&queue_name, &worker_id, true);
+
         // Semaphore limits concurrent task execution
         let semaphore = Arc::new(Semaphore::new(concurrency));
 
@@ -136,6 +141,10 @@ impl Worker {
                 // Shutdown signal received
                 _ = shutdown_rx.recv() => {
                     tracing::info!("Worker shutting down, waiting for in-flight tasks...");
+
+                    #[cfg(feature = "telemetry")]
+                    crate::telemetry::set_worker_active(&queue_name, &worker_id, false);
+
                     drop(done_tx);
                     while done_rx.recv().await.is_some() {}
                     tracing::info!("Worker shutdown complete");
@@ -202,6 +211,14 @@ impl Worker {
         }
     }
 
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.worker.claim_tasks",
+            skip(pool),
+            fields(queue = %queue_name, worker_id = %worker_id, count = count)
+        )
+    )]
     async fn claim_tasks(
         pool: &PgPool,
         queue_name: &str,
@@ -209,6 +226,9 @@ impl Worker {
         claim_timeout: u64,
         count: usize,
     ) -> anyhow::Result<Vec<ClaimedTask>> {
+        #[cfg(feature = "telemetry")]
+        let start = std::time::Instant::now();
+
         let query = "SELECT run_id, task_id, attempt, task_name, params, retry_strategy,
                     max_attempts, headers, wake_event, event_payload
              FROM durable.claim_task($1, $2, $3, $4)";
@@ -221,10 +241,21 @@ impl Worker {
             .fetch_all(pool)
             .await?;
 
-        rows.into_iter()
+        let tasks: Vec<ClaimedTask> = rows
+            .into_iter()
             .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Into::into)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        #[cfg(feature = "telemetry")]
+        {
+            let duration = start.elapsed().as_secs_f64();
+            crate::telemetry::record_task_claim_duration(queue_name, duration);
+            for _ in &tasks {
+                crate::telemetry::record_task_claimed(queue_name);
+            }
+        }
+
+        Ok(tasks)
     }
 
     async fn execute_task<State>(
@@ -238,9 +269,55 @@ impl Worker {
     ) where
         State: Clone + Send + Sync + 'static,
     {
+        // Create span for task execution, linked to parent trace context if available
+        let span = tracing::info_span!(
+            "durable.worker.execute_task",
+            queue = %queue_name,
+            task_id = %task.task_id,
+            run_id = %task.run_id,
+            task_name = %task.task_name,
+            attempt = task.attempt,
+        );
+
+        // Extract and set parent trace context from headers (for distributed tracing)
+        #[cfg(feature = "telemetry")]
+        if let Some(ref headers) = task.headers {
+            use tracing_opentelemetry::OpenTelemetrySpanExt;
+            let parent_cx = crate::telemetry::extract_trace_context(headers);
+            span.set_parent(parent_cx);
+        }
+
+        Self::execute_task_inner(
+            pool,
+            queue_name,
+            registry,
+            task,
+            claim_timeout,
+            fatal_on_lease_timeout,
+            state,
+        )
+        .instrument(span)
+        .await
+    }
+
+    async fn execute_task_inner<State>(
+        pool: PgPool,
+        queue_name: String,
+        registry: Arc<RwLock<TaskRegistry<State>>>,
+        task: ClaimedTask,
+        claim_timeout: u64,
+        fatal_on_lease_timeout: bool,
+        state: State,
+    ) where
+        State: Clone + Send + Sync + 'static,
+    {
         let task_label = format!("{} ({})", task.task_name, task.task_id);
         let task_id = task.task_id;
         let run_id = task.run_id;
+        #[cfg(feature = "telemetry")]
+        let task_name = task.task_name.clone();
+        #[cfg(feature = "telemetry")]
+        let queue_name_for_metrics = queue_name.clone();
         let start_time = Instant::now();
 
         // Create lease extension channel - TaskContext will notify when lease is extended
@@ -404,22 +481,64 @@ impl Worker {
             return;
         };
 
+        // Record metrics for task execution
+        #[cfg(feature = "telemetry")]
+        let outcome: &str;
+
         match result {
             Ok(output) => {
+                #[cfg(feature = "telemetry")]
+                {
+                    outcome = "completed";
+                }
                 Self::complete_run(&pool, &queue_name, task.run_id, output).await;
+
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::record_task_completed(&queue_name_for_metrics, &task_name);
             }
             Err(TaskError::Control(ControlFlow::Suspend)) => {
                 // Task suspended - do nothing, scheduler will resume it
+                #[cfg(feature = "telemetry")]
+                {
+                    outcome = "suspended";
+                }
                 tracing::debug!("Task {} suspended", task_label);
             }
             Err(TaskError::Control(ControlFlow::Cancelled)) => {
                 // Task cancelled - do nothing
+                #[cfg(feature = "telemetry")]
+                {
+                    outcome = "cancelled";
+                }
                 tracing::info!("Task {} was cancelled", task_label);
             }
-            Err(TaskError::Failed(e)) => {
+            Err(TaskError::Failed(ref e)) => {
+                #[cfg(feature = "telemetry")]
+                {
+                    outcome = "failed";
+                }
                 tracing::error!("Task {} failed: {}", task_label, e);
-                Self::fail_run(&pool, &queue_name, task.run_id, &e).await;
+                Self::fail_run(&pool, &queue_name, task.run_id, e).await;
+
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::record_task_failed(
+                    &queue_name_for_metrics,
+                    &task_name,
+                    "task_error",
+                );
             }
+        }
+
+        // Record execution duration
+        #[cfg(feature = "telemetry")]
+        {
+            let duration = start_time.elapsed().as_secs_f64();
+            crate::telemetry::record_task_execution_duration(
+                &queue_name_for_metrics,
+                &task_name,
+                outcome,
+                duration,
+            );
         }
     }
 
