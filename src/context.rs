@@ -155,15 +155,7 @@ where
     ///
     ///    Attempting to capture any surrounding variables in `f` will cause
     ///    a compile-time error. Instead, you must pass in any needed state through
-    ///    the `params` argument:
-    ///
-    ///     ```ignore
-    ///     let payment_id = ctx.step("run-step", "My string param", |my_string_param, _state| async move {
-    ///         let idempotency_key = format!("{}:{}:charge", my_string_param, ctx.task_id);
-    ///         state.stripe.charge(params.amount, &idempotency_key).await?;
-    ///         Ok(payment_id)
-    ///     }).await?;
-    ///     ```
+    ///    the `params` argument.
     ///
     ///
     /// # Errors
@@ -174,8 +166,8 @@ where
     /// # Example
     ///
     /// ```ignore
-    /// let payment_id = ctx.step("charge-payment", (), |_, _| async {
-    ///     let idempotency_key = format!("{}:charge", ctx.task_id);
+    /// let payment_id = ctx.step("charge-payment", ctx.task_id, |task_id, _state| async {
+    ///     let idempotency_key = format!("{}:charge", task_id);
     ///     stripe::charge(amount, &idempotency_key).await
     /// }).await?;
     /// ```
