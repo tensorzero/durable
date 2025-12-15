@@ -542,6 +542,42 @@ where
         Ok(())
     }
 
+    /// Check if a task and all its recursive children are "blocked".
+    ///
+    /// Blocked states: sleeping, completed, failed, cancelled
+    /// Not blocked states: pending, running
+    ///
+    /// Returns `Ok(Some(true))` if the entire task tree is blocked.
+    /// Returns `Ok(Some(false))` if any task in the tree is pending or running.
+    /// Returns `Ok(None)` if the task does not exist.
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.client.is_task_tree_blocked",
+            skip(self),
+            fields(queue, task_id = %task_id)
+        )
+    )]
+    pub async fn is_task_tree_blocked(
+        &self,
+        task_id: Uuid,
+        queue_name: Option<&str>,
+    ) -> anyhow::Result<Option<bool>> {
+        let queue = queue_name.unwrap_or(&self.queue_name);
+
+        #[cfg(feature = "telemetry")]
+        tracing::Span::current().record("queue", queue);
+
+        let query = "SELECT durable.is_task_tree_blocked($1, $2)";
+        let result: (Option<bool>,) = sqlx::query_as(query)
+            .bind(queue)
+            .bind(task_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        Ok(result.0)
+    }
+
     /// Start a worker that processes tasks from the queue
     pub async fn start_worker(&self, options: WorkerOptions) -> Worker {
         Worker::start(

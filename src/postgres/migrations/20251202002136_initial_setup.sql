@@ -1375,6 +1375,68 @@ begin
 end;
 $$;
 
+-- Checks if a task and all its recursive children are in a "blocked" state.
+-- Blocked states: sleeping, completed, failed, cancelled
+-- Not blocked states: pending, running
+--
+-- Returns true if the entire task tree is blocked (no pending/running tasks).
+-- Returns false if any task in the tree is pending or running.
+-- Returns NULL if the task does not exist.
+create function durable.is_task_tree_blocked (
+  p_queue_name text,
+  p_task_id uuid
+)
+  returns boolean
+  language plpgsql
+  stable
+as $$
+declare
+  v_root_state text;
+  v_has_unblocked boolean;
+begin
+  -- Check if root task exists and get its state
+  execute format(
+    'select state from durable.%I where task_id = $1',
+    't_' || p_queue_name
+  )
+  into v_root_state
+  using p_task_id;
+
+  -- Return NULL if task doesn't exist
+  if v_root_state is null then
+    return null;
+  end if;
+
+  -- Quick check: if root is not blocked, return false immediately
+  if v_root_state in ('pending', 'running') then
+    return false;
+  end if;
+
+  -- Use recursive CTE to check all descendants
+  execute format(
+    'with recursive task_tree as (
+        select task_id, state
+          from durable.%1$I
+         where parent_task_id = $1
+
+        union all
+
+        select t.task_id, t.state
+          from durable.%1$I t
+          join task_tree tt on t.parent_task_id = tt.task_id
+     )
+     select exists(
+        select 1 from task_tree where state in (''pending'', ''running'')
+     )',
+    't_' || p_queue_name
+  )
+  into v_has_unblocked
+  using p_task_id;
+
+  return not v_has_unblocked;
+end;
+$$;
+
 -- Cleans up old completed, failed, or cancelled tasks and their related data.
 -- Deletes tasks whose terminal timestamp (completed_at, failed_at, or cancelled_at)
 -- is older than the specified TTL in seconds.
