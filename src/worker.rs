@@ -25,6 +25,13 @@ impl LeaseExtender {
     pub fn notify(&self, extend_by: Duration) {
         let _ = self.tx.try_send(extend_by);
     }
+
+    #[cfg(test)]
+    pub fn dummy_for_tests() -> Self {
+        Self {
+            tx: mpsc::channel(1).0,
+        }
+    }
 }
 
 /// A background worker that processes tasks from a queue.
@@ -248,6 +255,7 @@ impl Worker {
             claim_timeout,
             lease_extender,
             registry.clone(),
+            state.clone(),
         )
         .await
         {

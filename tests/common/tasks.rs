@@ -36,7 +36,7 @@ impl Task<()> for ResearchTask {
     ) -> TaskResult<Self::Output> {
         // Phase 1: Find relevant sources (checkpointed)
         let sources: Vec<String> = ctx
-            .step("find-sources", || async {
+            .step("find-sources", (), |_, _| async {
                 Ok(vec![
                     "https://example.com/article1".into(),
                     "https://example.com/article2".into(),
@@ -46,19 +46,23 @@ impl Task<()> for ResearchTask {
 
         // Phase 2: Analyze the sources (checkpointed)
         let analysis: String = ctx
-            .step("analyze", || async {
+            .step("analyze", (), |_, _| async {
                 Ok("Key findings from sources...".into())
             })
             .await?;
 
         // Phase 3: Generate summary (checkpointed)
         let summary: String = ctx
-            .step("summarize", || async {
-                Ok(format!(
-                    "Research summary for '{}': {}",
-                    params.query, analysis
-                ))
-            })
+            .step(
+                "summarize",
+                (params, analysis),
+                |(params, analysis), _| async move {
+                    Ok(format!(
+                        "Research summary for '{}': {}",
+                        params.query, analysis
+                    ))
+                },
+            )
             .await?;
 
         Ok(ResearchResult { summary, sources })
@@ -142,9 +146,9 @@ impl Task<()> for MultiStepTask {
         mut ctx: TaskContext,
         _state: (),
     ) -> TaskResult<Self::Output> {
-        let step1: i32 = ctx.step("step1", || async { Ok(1) }).await?;
-        let step2: i32 = ctx.step("step2", || async { Ok(2) }).await?;
-        let step3: i32 = ctx.step("step3", || async { Ok(3) }).await?;
+        let step1: i32 = ctx.step("step1", (), |_, _| async { Ok(1) }).await?;
+        let step2: i32 = ctx.step("step2", (), |_, _| async { Ok(2) }).await?;
+        let step3: i32 = ctx.step("step3", (), |_, _| async { Ok(3) }).await?;
         Ok(MultiStepOutput {
             step1,
             step2,
@@ -259,11 +263,15 @@ impl Task<()> for StepCountingTask {
     ) -> TaskResult<Self::Output> {
         // Each step returns a unique value that indicates it ran
         let step1_value: String = ctx
-            .step("step1", || async { Ok("step1_executed".to_string()) })
+            .step("step1", (), |_, _| async {
+                Ok("step1_executed".to_string())
+            })
             .await?;
 
         let step2_value: String = ctx
-            .step("step2", || async { Ok("step2_executed".to_string()) })
+            .step("step2", (), |_, _| async {
+                Ok("step2_executed".to_string())
+            })
             .await?;
 
         if params.fail_after_step2 {
@@ -273,7 +281,9 @@ impl Task<()> for StepCountingTask {
         }
 
         let step3_value: String = ctx
-            .step("step3", || async { Ok("step3_executed".to_string()) })
+            .step("step3", (), |_, _| async {
+                Ok("step3_executed".to_string())
+            })
             .await?;
 
         Ok(StepCountingOutput {
@@ -431,7 +441,7 @@ impl Task<()> for ReservedPrefixTask {
     ) -> TaskResult<Self::Output> {
         // This should fail because $ is reserved
         let _: String = ctx
-            .step("$bad-name", || async { Ok("test".into()) })
+            .step("$bad-name", (), |_, _| async { Ok("test".into()) })
             .await?;
         Ok(())
     }
@@ -759,7 +769,7 @@ impl Task<()> for ManyStepsTask {
     ) -> TaskResult<Self::Output> {
         for i in 0..params.num_steps {
             let _: u32 = ctx
-                .step(&format!("step-{i}"), || async move { Ok(i) })
+                .step(&format!("step-{i}"), i, |i, _| async move { Ok(i) })
                 .await?;
         }
         Ok(params.num_steps)
@@ -793,10 +803,9 @@ impl Task<()> for LargePayloadTask {
     ) -> TaskResult<Self::Output> {
         // Create a large string of repeated characters
         let payload: String = ctx
-            .step(
-                "generate",
-                || async move { Ok("x".repeat(params.size_bytes)) },
-            )
+            .step("generate", params, |params, _| async move {
+                Ok("x".repeat(params.size_bytes))
+            })
             .await?;
         Ok(payload)
     }
@@ -908,65 +917,6 @@ pub fn set_execution_tracker(tracker: Arc<ExecutionTracker>) {
 #[allow(dead_code)]
 pub fn get_execution_tracker() -> Option<Arc<ExecutionTracker>> {
     EXECUTION_TRACKER.with(|t| t.borrow().clone())
-}
-
-#[allow(dead_code)]
-pub struct CheckpointReplayTask;
-
-#[async_trait]
-impl Task<()> for CheckpointReplayTask {
-    const NAME: &'static str = "checkpoint-replay";
-    type Params = ();
-    type Output = String;
-
-    async fn run(
-        _params: Self::Params,
-        mut ctx: TaskContext,
-        _state: (),
-    ) -> TaskResult<Self::Output> {
-        let tracker = get_execution_tracker();
-
-        // Step 1 - increment counter every time closure actually runs
-        let _: String = ctx
-            .step("step1", || async {
-                if let Some(ref t) = tracker {
-                    t.step1_count.fetch_add(1, Ordering::SeqCst);
-                }
-                Ok("step1_result".to_string())
-            })
-            .await?;
-
-        // Step 2 - increment counter
-        let _: String = ctx
-            .step("step2", || async {
-                if let Some(ref t) = tracker {
-                    t.step2_count.fetch_add(1, Ordering::SeqCst);
-                }
-                Ok("step2_result".to_string())
-            })
-            .await?;
-
-        // Check if we should fail
-        if let Some(ref t) = tracker
-            && t.should_fail_after_step2.load(Ordering::SeqCst)
-        {
-            return Err(TaskError::Failed(anyhow::anyhow!(
-                "Intentional failure after step2"
-            )));
-        }
-
-        // Step 3 - increment counter
-        let _: String = ctx
-            .step("step3", || async {
-                if let Some(ref t) = tracker {
-                    t.step3_count.fetch_add(1, Ordering::SeqCst);
-                }
-                Ok("step3_result".to_string())
-            })
-            .await?;
-
-        Ok("completed".to_string())
-    }
 }
 
 // ============================================================================

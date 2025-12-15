@@ -3,7 +3,6 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -59,6 +58,8 @@ where
     task: ClaimedTask,
     claim_timeout: u64,
 
+    state: State,
+
     /// Checkpoint cache: loaded on creation, updated on writes.
     checkpoint_cache: HashMap<String, JsonValue>,
 
@@ -71,9 +72,6 @@ where
 
     /// Task registry for validating spawn_by_name calls.
     registry: Arc<RwLock<TaskRegistry<State>>>,
-
-    /// Phantom data to carry the State type parameter.
-    _state: PhantomData<State>,
 }
 
 /// Validate that a user-provided step name doesn't use reserved prefix.
@@ -99,6 +97,7 @@ where
         claim_timeout: u64,
         lease_extender: LeaseExtender,
         registry: Arc<RwLock<TaskRegistry<State>>>,
+        state: State,
     ) -> Result<Self, sqlx::Error> {
         // Load all checkpoints for this task into cache
         let checkpoints: Vec<CheckpointRow> = sqlx::query_as(
@@ -127,7 +126,7 @@ where
             step_counters: HashMap::new(),
             lease_extender,
             registry,
-            _state: PhantomData,
+            state,
         })
     }
 
@@ -141,7 +140,31 @@ where
     ///
     /// * `name` - Unique name for this step. If called multiple times with
     ///   the same name, auto-increments: "name", "name#2", "name#3"
+    /// * `params` - Data to pass to the provided `f` closure. This data will
+    ///    be serialized, hashed, and included as part of the internal checkpoint name.
+    ///    As a result, a previously-completed run if 'step' will only be re-used if
+    ///    both `name` *AND* `params` are the same.
+    ///    Your `Serialize` implementation for `params` must include *all* of the data
+    ///    accessible through `params` (e.g. you should not use `#[serde(skip)]`).
+    ///    An incorrect `Serialize` implementation will cause a previously result to
+    ///    be incorrectly re-used, even though the second 'step' call was invoked with different
+    ///    'params' than the cached result.
     /// * `f` - Async closure to execute. Must return a JSON-serializable result.
+    ///    This closure receives two arguments - the `params` argument described above,
+    ///    and the current 'state' of the task.
+    ///
+    ///    Attempting to capture any surrounding variables in `f` will cause
+    ///    a compile-time error. Instead, you must pass in any needed state through
+    ///    the `params` argument:
+    ///
+    ///     ```ignore
+    ///     let payment_id = ctx.step("run-step", "My string param", |my_string_param, _state| async move {
+    ///         let idempotency_key = format!("{}:{}:charge", my_string_param, ctx.task_id);
+    ///         state.stripe.charge(params.amount, &idempotency_key).await?;
+    ///         Ok(payment_id)
+    ///     }).await?;
+    ///     ```
+    ///
     ///
     /// # Errors
     ///
@@ -151,19 +174,25 @@ where
     /// # Example
     ///
     /// ```ignore
-    /// let payment_id = ctx.step("charge-payment", || async {
+    /// let payment_id = ctx.step("charge-payment", (), |_, _| async {
     ///     let idempotency_key = format!("{}:charge", ctx.task_id);
-    ///     stripe::charge(amount, &idempotency_key).await
+    ///     stripe::charge(amount, &idempotency_key).awaitz
     /// }).await?;
     /// ```
-    pub async fn step<T, F, Fut>(&mut self, name: &str, f: F) -> TaskResult<T>
+    pub async fn step<T, P, Fut>(
+        &mut self,
+        base_name: &str,
+        params: P,
+        f: fn(P, State) -> Fut,
+    ) -> TaskResult<T>
     where
+        P: Serialize,
         T: Serialize + DeserializeOwned + Send,
-        F: FnOnce() -> Fut + Send,
         Fut: std::future::Future<Output = anyhow::Result<T>> + Send,
+        State: Clone,
     {
-        validate_user_name(name)?;
-        let checkpoint_name = self.get_checkpoint_name(name);
+        validate_user_name(base_name)?;
+        let checkpoint_name = self.get_checkpoint_name(base_name, &params)?;
 
         // Return cached value if step was already completed
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
@@ -171,7 +200,7 @@ where
         }
 
         // Execute the step
-        let result = f().await?;
+        let result = f(params, self.state.clone()).await?;
 
         // Persist checkpoint (also extends claim lease)
         self.persist_checkpoint(&checkpoint_name, &result).await?;
@@ -179,15 +208,32 @@ where
         Ok(result)
     }
 
+    fn get_params_hash<P: Serialize>(&self, data: &P) -> TaskResult<String> {
+        let mut json_value = serde_json::to_value(data)?;
+        json_value.sort_all_objects();
+        let hash = blake3::hash(json_value.to_string().as_bytes());
+        Ok(hash.to_string())
+    }
+
     /// Generate unique checkpoint name, handling duplicate step names
-    fn get_checkpoint_name(&mut self, base_name: &str) -> String {
-        let count = self.step_counters.entry(base_name.to_string()).or_insert(0);
+    /// The provided 'data' is hashed and concatenated to the base name
+    fn get_checkpoint_name<P: Serialize>(
+        &mut self,
+        base_name: &str,
+        data: &P,
+    ) -> TaskResult<String> {
+        let hash = self.get_params_hash(data)?;
+        let name_with_hash = format!("{base_name}-{hash}");
+        let count = self
+            .step_counters
+            .entry(name_with_hash.clone())
+            .or_insert(0);
         *count += 1;
 
         if *count == 1 {
-            base_name.to_string()
+            Ok(name_with_hash)
         } else {
-            format!("{base_name}#{count}")
+            Ok(format!("{name_with_hash}#{count}"))
         }
     }
 
@@ -227,7 +273,7 @@ where
     /// with the scheduler and enable deterministic testing via `durable.fake_now`.
     pub async fn sleep_for(&mut self, name: &str, duration: std::time::Duration) -> TaskResult<()> {
         validate_user_name(name)?;
-        let checkpoint_name = self.get_checkpoint_name(name);
+        let checkpoint_name = self.get_checkpoint_name(name, &())?;
         let duration_ms = duration.as_millis() as i64;
 
         let (needs_suspend,): (bool,) = sqlx::query_as("SELECT durable.sleep_for($1, $2, $3, $4)")
@@ -275,7 +321,7 @@ where
     ) -> TaskResult<T> {
         validate_user_name(event_name)?;
         let step_name = format!("$awaitEvent:{event_name}");
-        let checkpoint_name = self.get_checkpoint_name(&step_name);
+        let checkpoint_name = self.get_checkpoint_name(&step_name, &())?;
 
         // Check cache for already-received event
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
@@ -377,7 +423,7 @@ where
     /// The value is checkpointed - retries will return the same value.
     /// Each call generates a new checkpoint with auto-incremented name.
     pub async fn rand(&mut self) -> TaskResult<f64> {
-        let checkpoint_name = self.get_checkpoint_name("$rand");
+        let checkpoint_name = self.get_checkpoint_name("$rand", &())?;
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
             return Ok(serde_json::from_value(cached.clone())?);
         }
@@ -391,7 +437,7 @@ where
     /// The timestamp is checkpointed - retries will return the same timestamp.
     /// Each call generates a new checkpoint with auto-incremented name.
     pub async fn now(&mut self) -> TaskResult<DateTime<Utc>> {
-        let checkpoint_name = self.get_checkpoint_name("$now");
+        let checkpoint_name = self.get_checkpoint_name("$now", &())?;
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
             let stored: String = serde_json::from_value(cached.clone())?;
             return Ok(DateTime::parse_from_rfc3339(&stored)
@@ -409,7 +455,7 @@ where
     /// The UUID is checkpointed - retries will return the same UUID.
     /// Each call generates a new checkpoint with auto-incremented name.
     pub async fn uuid7(&mut self) -> TaskResult<Uuid> {
-        let checkpoint_name = self.get_checkpoint_name("$uuid7");
+        let checkpoint_name = self.get_checkpoint_name("$uuid7", &())?;
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
             return Ok(serde_json::from_value(cached.clone())?);
         }
@@ -515,7 +561,7 @@ where
         options: SpawnOptions,
     ) -> TaskResult<TaskHandle<T>> {
         validate_user_name(name)?;
-        let checkpoint_name = self.get_checkpoint_name(&format!("$spawn:{name}"));
+        let checkpoint_name = self.get_checkpoint_name(&format!("$spawn:{name}"), &params)?;
 
         // Return cached task_id if already spawned
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
@@ -601,7 +647,7 @@ where
         // await_event handles checkpointing and suspension
         // We use the internal event name which starts with $ so we need to bypass validation
         let step_name = format!("$awaitEvent:{event_name}");
-        let checkpoint_name = self.get_checkpoint_name(&step_name);
+        let checkpoint_name = self.get_checkpoint_name(&step_name, &())?;
 
         // Check cache for already-received event
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
@@ -666,5 +712,95 @@ where
                 "Child task was cancelled"
             ))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+    use crate::{Durable, MIGRATOR};
+
+    // Note that this is a 'unit' test in order to call private methods, but it still needs Postgres to be running
+    #[sqlx::test(migrator = "MIGRATOR")]
+    async fn test_checkpoint_name_hashing(pool: PgPool) {
+        let client = Durable::builder()
+            .pool(pool.clone())
+            .queue_name("my_test_queue")
+            .build()
+            .await
+            .expect("Failed to create Durable client");
+        client.create_queue(None).await.unwrap();
+        let mut ctx = TaskContext::create(
+            pool,
+            "my_test_queue".to_string(),
+            ClaimedTask {
+                task_id: Uuid::now_v7(),
+                run_id: Uuid::now_v7(),
+                attempt: 1,
+                task_name: "my_test_task".to_string(),
+                params: JsonValue::Null,
+                retry_strategy: None,
+                max_attempts: None,
+                event_payload: None,
+                headers: None,
+                wake_event: None,
+            },
+            10,
+            LeaseExtender::dummy_for_tests(),
+            Arc::new(RwLock::new(TaskRegistry::new())),
+            (),
+        )
+        .await
+        .unwrap();
+
+        let first_name = ctx
+            .get_checkpoint_name("my_step", &"my_string_data")
+            .unwrap();
+
+        assert_eq!(
+            first_name,
+            "my_step-f3c75b4ef2b1412ee609c4a60004408b4f9d168ddc48e36d80418617c00fbc48"
+        );
+
+        // The hash should be the same, so just an ID should get appended
+        let second_name = ctx
+            .get_checkpoint_name("my_step", &"my_string_data")
+            .unwrap();
+        assert_eq!(
+            second_name,
+            format!("my_step-f3c75b4ef2b1412ee609c4a60004408b4f9d168ddc48e36d80418617c00fbc48#2")
+        );
+
+        let first_map = HashMap::from([
+            ("first_key".to_string(), "first_value".to_string()),
+            ("second_key".to_string(), "second_value".to_string()),
+        ]);
+
+        let swapped_map = HashMap::from([
+            ("second_key".to_string(), "second_value".to_string()),
+            ("first_key".to_string(), "first_value".to_string()),
+        ]);
+
+        let first_map_name = ctx.get_checkpoint_name("my_map_step", &first_map).unwrap();
+        let second_map_name = ctx
+            .get_checkpoint_name("my_map_step", &swapped_map)
+            .unwrap();
+        // The two maps should end up with the same hash, since we sort the keys
+        // after serializing to a JSON value
+        assert_eq!(second_map_name, format!("{first_map_name}#2"));
+
+        let distinct_map = HashMap::from([
+            ("first_key".to_string(), "first_value".to_string()),
+            ("second_key".to_string(), "new_second_value".to_string()),
+        ]);
+
+        let distinct_map_name = ctx
+            .get_checkpoint_name("my_map_step", &distinct_map)
+            .unwrap();
+        assert_eq!(
+            distinct_map_name,
+            format!("my_map_step-3b522428f7afb6db8bfadc8f32e02922e45a479ba417fe218f639d72e3b22021")
+        );
     }
 }
