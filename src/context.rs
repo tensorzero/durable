@@ -156,6 +156,14 @@ where
     ///     stripe::charge(amount, &idempotency_key).await
     /// }).await?;
     /// ```
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.task.step",
+            skip(self, f),
+            fields(task_id = %self.task_id, step_name = %name)
+        )
+    )]
     pub async fn step<T, F, Fut>(&mut self, name: &str, f: F) -> TaskResult<T>
     where
         T: Serialize + DeserializeOwned + Send,
@@ -174,7 +182,20 @@ where
         let result = f().await?;
 
         // Persist checkpoint (also extends claim lease)
+        #[cfg(feature = "telemetry")]
+        let checkpoint_start = std::time::Instant::now();
+
         self.persist_checkpoint(&checkpoint_name, &result).await?;
+
+        #[cfg(feature = "telemetry")]
+        {
+            let duration = checkpoint_start.elapsed().as_secs_f64();
+            crate::telemetry::record_checkpoint_duration(
+                &self.queue_name,
+                &self.task.task_name,
+                duration,
+            );
+        }
 
         Ok(result)
     }
@@ -225,6 +246,14 @@ where
     ///
     /// Wake time is computed using the database clock to ensure consistency
     /// with the scheduler and enable deterministic testing via `durable.fake_now`.
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.task.sleep_for",
+            skip(self),
+            fields(task_id = %self.task_id, duration_ms = duration.as_millis() as u64)
+        )
+    )]
     pub async fn sleep_for(&mut self, name: &str, duration: std::time::Duration) -> TaskResult<()> {
         validate_user_name(name)?;
         let checkpoint_name = self.get_checkpoint_name(name);
@@ -268,6 +297,14 @@ where
     ///     Some(Duration::from_secs(7 * 24 * 3600)),
     /// ).await?;
     /// ```
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.task.await_event",
+            skip(self, timeout),
+            fields(task_id = %self.task_id, event_name = %event_name)
+        )
+    )]
     pub async fn await_event<T: DeserializeOwned>(
         &mut self,
         event_name: &str,
@@ -323,6 +360,14 @@ where
     /// updates the payload (last write wins). Tasks waiting for this event
     /// are woken with the payload at the time of the write that woke them;
     /// subsequent writes do not propagate to already-woken tasks.
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.task.emit_event",
+            skip(self, payload),
+            fields(task_id = %self.task_id, event_name = %event_name)
+        )
+    )]
     pub async fn emit_event<T: Serialize>(&self, event_name: &str, payload: &T) -> TaskResult<()> {
         if event_name.is_empty() {
             return Err(TaskError::Failed(anyhow::anyhow!(
@@ -352,6 +397,14 @@ where
     ///
     /// # Errors
     /// Returns `TaskError::Control(Cancelled)` if the task was cancelled.
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.task.heartbeat",
+            skip(self),
+            fields(task_id = %self.task_id)
+        )
+    )]
     pub async fn heartbeat(&self, duration: Option<std::time::Duration>) -> TaskResult<()> {
         let extend_by = duration
             .map(|d| d.as_secs() as i32)
@@ -454,6 +507,14 @@ where
     /// let r1: ItemResult = ctx.join("item-1", h1).await?;
     /// let r2: ItemResult = ctx.join("item-2", h2).await?;
     /// ```
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.task.spawn",
+            skip(self, params, options),
+            fields(task_id = %self.task_id, subtask_name = T::NAME)
+        )
+    )]
     pub async fn spawn<T>(
         &mut self,
         name: &str,
@@ -515,6 +576,19 @@ where
         options: SpawnOptions,
     ) -> TaskResult<TaskHandle<T>> {
         validate_user_name(name)?;
+
+        // Validate headers don't use reserved prefix
+        if let Some(ref headers) = options.headers {
+            for key in headers.keys() {
+                if key.starts_with("durable::") {
+                    return Err(TaskError::Failed(anyhow::anyhow!(
+                        "Header key '{}' uses reserved prefix 'durable::'. User headers cannot start with 'durable::'.",
+                        key
+                    )));
+                }
+            }
+        }
+
         let checkpoint_name = self.get_checkpoint_name(&format!("$spawn:{name}"));
 
         // Return cached task_id if already spawned
@@ -574,8 +648,7 @@ where
     ///
     /// # Arguments
     ///
-    /// * `name` - Unique name for this join operation (used for checkpointing).
-    ///   Uniqueness is constrained just within this task, not globally or for child tasks.
+    /// * `name` - Unique name for this join operation (used for checkpointing)
     /// * `handle` - The [`TaskHandle`] returned by [`spawn`](Self::spawn)
     ///
     /// # Errors
@@ -590,6 +663,14 @@ where
     /// // ... do other work ...
     /// let result: ComputeResult = ctx.join("compute", handle).await?;
     /// ```
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.task.join",
+            skip(self, handle),
+            fields(task_id = %self.task_id, child_task_id = %handle.task_id)
+        )
+    )]
     pub async fn join<T: DeserializeOwned>(
         &mut self,
         name: &str,
