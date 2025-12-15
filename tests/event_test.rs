@@ -590,3 +590,106 @@ async fn test_emit_from_different_task(pool: PgPool) -> sqlx::Result<()> {
 
     Ok(())
 }
+
+// ============================================================================
+// Transaction Tests for emit_event
+// ============================================================================
+
+/// Test that emit_event_with in a committed transaction persists the event.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_emit_event_with_transaction_commit(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "event_tx_commit").await;
+    client.create_queue(None).await.unwrap();
+
+    // Create a test table
+    sqlx::query("CREATE TABLE test_event_orders (id UUID PRIMARY KEY, status TEXT)")
+        .execute(&pool)
+        .await?;
+
+    let order_id = uuid::Uuid::now_v7();
+    let event_name = format!("order_created_{}", order_id);
+
+    // Start a transaction and do both operations
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("INSERT INTO test_event_orders (id, status) VALUES ($1, $2)")
+        .bind(order_id)
+        .bind("pending")
+        .execute(&mut *tx)
+        .await?;
+
+    client
+        .emit_event_with(&mut *tx, &event_name, &json!({"order_id": order_id}), None)
+        .await
+        .expect("Failed to emit event in transaction");
+
+    tx.commit().await?;
+
+    // Verify both the order and event exist
+    let order_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM test_event_orders WHERE id = $1)")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await?;
+    assert!(order_exists, "Order should exist after commit");
+
+    let event_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM durable.e_event_tx_commit WHERE event_name = $1)",
+    )
+    .bind(&event_name)
+    .fetch_one(&pool)
+    .await?;
+    assert!(event_exists, "Event should exist after commit");
+
+    Ok(())
+}
+
+/// Test that emit_event_with in a rolled back transaction does NOT persist the event.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_emit_event_with_transaction_rollback(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "event_tx_rollback").await;
+    client.create_queue(None).await.unwrap();
+
+    // Create a test table
+    sqlx::query("CREATE TABLE test_event_orders_rb (id UUID PRIMARY KEY, status TEXT)")
+        .execute(&pool)
+        .await?;
+
+    let order_id = uuid::Uuid::now_v7();
+    let event_name = format!("order_created_{}", order_id);
+
+    // Start a transaction and do both operations, then rollback
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("INSERT INTO test_event_orders_rb (id, status) VALUES ($1, $2)")
+        .bind(order_id)
+        .bind("pending")
+        .execute(&mut *tx)
+        .await?;
+
+    client
+        .emit_event_with(&mut *tx, &event_name, &json!({"order_id": order_id}), None)
+        .await
+        .expect("Failed to emit event in transaction");
+
+    // Rollback instead of commit
+    tx.rollback().await?;
+
+    // Verify neither the order nor event exist
+    let order_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM test_event_orders_rb WHERE id = $1)")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await?;
+    assert!(!order_exists, "Order should NOT exist after rollback");
+
+    let event_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM durable.e_event_tx_rollback WHERE event_name = $1)",
+    )
+    .bind(&event_name)
+    .fetch_one(&pool)
+    .await?;
+    assert!(!event_exists, "Event should NOT exist after rollback");
+
+    Ok(())
+}
