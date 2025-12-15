@@ -146,7 +146,7 @@ where
     ///    both `name` *AND* `params` are the same.
     ///    Your `Serialize` implementation for `params` must include *all* of the data
     ///    accessible through `params` (e.g. you should not use `#[serde(skip)]`).
-    ///    An incorrect `Serialize` implementation will cause a previously result to
+    ///    An incorrect `Serialize` implementation will cause a previous result to
     ///    be incorrectly re-used, even though the second 'step' call was invoked with different
     ///    'params' than the cached result.
     /// * `f` - Async closure to execute. Must return a JSON-serializable result.
