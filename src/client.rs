@@ -506,6 +506,47 @@ where
         payload: &T,
         queue_name: Option<&str>,
     ) -> anyhow::Result<()> {
+        self.emit_event_with(&self.pool, event_name, payload, queue_name)
+            .await
+    }
+
+    /// Emit an event with a custom executor (e.g., a transaction).
+    ///
+    /// This allows you to atomically emit an event as part of a larger transaction.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut tx = client.pool().begin().await?;
+    ///
+    /// sqlx::query("INSERT INTO orders (id) VALUES ($1)")
+    ///     .bind(order_id)
+    ///     .execute(&mut *tx)
+    ///     .await?;
+    ///
+    /// client.emit_event_with(&mut *tx, "order_created", &order_id, None).await?;
+    ///
+    /// tx.commit().await?;
+    /// ```
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.client.emit_event",
+            skip(self, executor, payload),
+            fields(queue, event_name = %event_name)
+        )
+    )]
+    pub async fn emit_event_with<'e, T, E>(
+        &self,
+        executor: E,
+        event_name: &str,
+        payload: &T,
+        queue_name: Option<&str>,
+    ) -> anyhow::Result<()>
+    where
+        T: Serialize,
+        E: Executor<'e, Database = Postgres>,
+    {
         anyhow::ensure!(!event_name.is_empty(), "event_name must be non-empty");
 
         let queue = queue_name.unwrap_or(&self.queue_name);
@@ -520,7 +561,7 @@ where
             .bind(queue)
             .bind(event_name)
             .bind(&payload_json)
-            .execute(&self.pool)
+            .execute(executor)
             .await?;
 
         #[cfg(feature = "telemetry")]
