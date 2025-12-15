@@ -176,7 +176,7 @@ where
     /// ```ignore
     /// let payment_id = ctx.step("charge-payment", (), |_, _| async {
     ///     let idempotency_key = format!("{}:charge", ctx.task_id);
-    ///     stripe::charge(amount, &idempotency_key).awaitz
+    ///     stripe::charge(amount, &idempotency_key).await
     /// }).await?;
     /// ```
     pub async fn step<T, P, Fut>(
