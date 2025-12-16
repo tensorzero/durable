@@ -532,7 +532,7 @@ impl Task<()> for SingleSpawnTask {
             .await?;
 
         // Join and get result
-        let child_result: i32 = ctx.join("child", handle).await?;
+        let child_result: i32 = ctx.join(handle).await?;
 
         Ok(SingleSpawnOutput { child_result })
     }
@@ -580,8 +580,8 @@ impl Task<()> for MultiSpawnTask {
 
         // Join all children (in order)
         let mut results = Vec::new();
-        for (i, handle) in handles.into_iter().enumerate() {
-            let result: i32 = ctx.join(&format!("child-{i}"), handle).await?;
+        for handle in handles {
+            let result: i32 = ctx.join(handle).await?;
             results.push(result);
         }
 
@@ -616,7 +616,7 @@ impl Task<()> for SpawnFailingChildTask {
             )
             .await?;
         // This should fail because child fails
-        ctx.join("child", handle).await?;
+        ctx.join(handle).await?;
         Ok(())
     }
 }
@@ -712,7 +712,7 @@ impl Task<()> for SpawnSlowChildTask {
             .await?;
 
         // Join (this will wait for the slow child)
-        let result = ctx.join("slow-child", handle).await?;
+        let result = ctx.join(handle).await?;
         Ok(result)
     }
 }
@@ -1184,7 +1184,7 @@ impl Task<()> for SpawnThenFailTask {
         }
 
         // Second attempt - join child
-        let child_result: u32 = ctx.join("child", child_handle).await?;
+        let child_result: u32 = ctx.join(child_handle).await?;
 
         Ok(serde_json::json!({
             "child_result": child_result
@@ -1234,7 +1234,7 @@ impl Task<()> for SpawnByNameTask {
             .await?;
 
         // Join and get result
-        let child_result: i32 = ctx.join("child", handle).await?;
+        let child_result: i32 = ctx.join(handle).await?;
 
         Ok(SpawnByNameOutput { child_result })
     }
