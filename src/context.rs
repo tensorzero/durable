@@ -250,6 +250,17 @@ where
         }
     }
 
+    /// Get checkpoint name without incrementing counter.
+    /// Use for operations where the base_name is already unique (e.g., contains a UUID).
+    fn get_checkpoint_name_no_increment<P: Serialize>(
+        &self,
+        base_name: &str,
+        data: &P,
+    ) -> TaskResult<String> {
+        let hash = self.get_params_hash(data)?;
+        Ok(format!("{base_name}-{hash}"))
+    }
+
     /// Persist checkpoint to database and update cache.
     /// Also extends the claim lease to prevent timeout.
     async fn persist_checkpoint<T: Serialize>(&mut self, name: &str, value: &T) -> TaskResult<()> {
@@ -542,8 +553,8 @@ where
     /// // Do work while subtasks run...
     ///
     /// // Wait for results
-    /// let r1: ItemResult = ctx.join("item-1", h1).await?;
-    /// let r2: ItemResult = ctx.join("item-2", h2).await?;
+    /// let r1: ItemResult = ctx.join(h1).await?;
+    /// let r2: ItemResult = ctx.join(h2).await?;
     /// ```
     #[cfg_attr(
         feature = "telemetry",
@@ -604,7 +615,7 @@ where
     /// ).await?;
     ///
     /// // Wait for result
-    /// let result: ProcessResult = ctx.join("process-item", handle).await?;
+    /// let result: ProcessResult = ctx.join(handle).await?;
     /// ```
     pub async fn spawn_by_name<T: DeserializeOwned>(
         &mut self,
@@ -698,7 +709,7 @@ where
     /// ```ignore
     /// let handle = ctx.spawn::<ComputeTask>("compute", params).await?;
     /// // ... do other work ...
-    /// let result: ComputeResult = ctx.join("compute", handle).await?;
+    /// let result: ComputeResult = ctx.join(handle).await?;
     /// ```
     #[cfg_attr(
         feature = "telemetry",
@@ -708,18 +719,13 @@ where
             fields(task_id = %self.task_id, child_task_id = %handle.task_id)
         )
     )]
-    pub async fn join<T: DeserializeOwned>(
-        &mut self,
-        name: &str,
-        handle: TaskHandle<T>,
-    ) -> TaskResult<T> {
-        validate_user_name(name)?;
+    pub async fn join<T: DeserializeOwned>(&mut self, handle: TaskHandle<T>) -> TaskResult<T> {
         let event_name = format!("$child:{}", handle.task_id);
 
         // await_event handles checkpointing and suspension
         // We use the internal event name which starts with $ so we need to bypass validation
         let step_name = format!("$awaitEvent:{event_name}");
-        let checkpoint_name = self.get_checkpoint_name(&step_name, &())?;
+        let checkpoint_name = self.get_checkpoint_name_no_increment(&step_name, &())?;
 
         // Check cache for already-received event
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
