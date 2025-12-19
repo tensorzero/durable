@@ -1,5 +1,6 @@
 use durable::{Task, TaskContext, TaskResult, async_trait};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 // ============================================================================
 // NoOpTask - Minimal task for baseline throughput measurement
@@ -10,7 +11,9 @@ pub struct NoOpTask;
 
 #[async_trait]
 impl Task<()> for NoOpTask {
-    const NAME: &'static str = "bench-noop";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("bench-noop")
+    }
     type Params = ();
     type Output = ();
 
@@ -34,7 +37,9 @@ pub struct QuickParams {
 
 #[async_trait]
 impl Task<()> for QuickTask {
-    const NAME: &'static str = "bench-quick";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("bench-quick")
+    }
     type Params = QuickParams;
     type Output = u32;
 
@@ -58,7 +63,9 @@ pub struct MultiStepParams {
 
 #[async_trait]
 impl Task<()> for MultiStepBenchTask {
-    const NAME: &'static str = "bench-multi-step";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("bench-multi-step")
+    }
     type Params = MultiStepParams;
     type Output = u32;
 
@@ -91,7 +98,9 @@ pub struct LargePayloadParams {
 
 #[async_trait]
 impl Task<()> for LargePayloadBenchTask {
-    const NAME: &'static str = "bench-large-payload";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("bench-large-payload")
+    }
     type Params = LargePayloadParams;
     type Output = usize;
 

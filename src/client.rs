@@ -277,7 +277,7 @@ where
     /// Register a task type. Required before spawning or processing.
     pub async fn register<T: Task<State>>(&self) -> &Self {
         let mut registry = self.registry.write().await;
-        registry.insert(T::NAME.to_string(), &PhantomData::<T>);
+        registry.insert(T::name().into_owned(), &PhantomData::<T>);
         self
     }
 
@@ -293,7 +293,7 @@ where
         params: T::Params,
         options: SpawnOptions,
     ) -> anyhow::Result<SpawnResult> {
-        self.spawn_by_name(T::NAME, serde_json::to_value(&params)?, options)
+        self.spawn_by_name(&T::name(), serde_json::to_value(&params)?, options)
             .await
     }
 
@@ -362,9 +362,14 @@ where
         T: Task<State>,
         E: Executor<'e, Database = Postgres>,
     {
-        // Type-safe spawn uses T::NAME which is already registered
-        self.spawn_by_name_internal(executor, T::NAME, serde_json::to_value(&params)?, options)
-            .await
+        // Type-safe spawn uses T::name() which is already registered
+        self.spawn_by_name_internal(
+            executor,
+            &T::name(),
+            serde_json::to_value(&params)?,
+            options,
+        )
+        .await
     }
 
     /// Spawn a task by name using a custom executor.

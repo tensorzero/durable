@@ -61,7 +61,7 @@ struct ResearchTask;
 
 #[async_trait]
 impl Task for ResearchTask {
-    const NAME: &'static str = "research";
+    fn name() -> Cow<'static, str> { Cow::Borrowed("research") }
     type Params = ResearchParams;
     type Output = ResearchResult;
 
@@ -131,9 +131,9 @@ Tasks are defined by implementing the [`Task`] trait:
 ```rust
 #[async_trait]
 impl Task for MyTask {
-    const NAME: &'static str = "my-task";  // Unique identifier
-    type Params = MyParams;                 // Input (JSON-serializable)
-    type Output = MyOutput;                 // Output (JSON-serializable)
+    fn name() -> Cow<'static, str> { Cow::Borrowed("my-task") }  // Unique identifier
+    type Params = MyParams;                                       // Input (JSON-serializable)
+    type Output = MyOutput;                                       // Output (JSON-serializable)
 
     async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
         // Your task logic here
