@@ -5,8 +5,10 @@ mod common;
 use common::helpers::{get_task_state, wait_for_task_terminal};
 use common::tasks::{EventEmitterParams, EventEmitterTask, EventWaitParams, EventWaitingTask};
 use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
+use futures::future::join_all;
 use serde_json::json;
 use sqlx::{AssertSqlSafe, PgPool};
+use std::sync::Arc;
 use std::time::Duration;
 
 async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
@@ -21,6 +23,139 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 // ============================================================================
 // Event Tests
 // ============================================================================
+
+/// Ensure await/emit functions use advisory locks to avoid lost wakeups.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_event_functions_use_advisory_locks(pool: PgPool) -> sqlx::Result<()> {
+    let await_def: String = sqlx::query_scalar(
+        "SELECT pg_get_functiondef('durable.await_event(text, uuid, uuid, text, text, integer)'::regprocedure)",
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    assert!(
+        await_def.contains("pg_advisory_xact_lock")
+            && await_def.contains("hashtext(p_queue_name)")
+            && await_def.contains("hashtext(p_event_name)"),
+        "await_event should lock on (queue, event) to avoid lost wakeups"
+    );
+
+    let emit_def: String = sqlx::query_scalar(
+        "SELECT pg_get_functiondef('durable.emit_event(text, text, jsonb)'::regprocedure)",
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    assert!(
+        emit_def.contains("pg_advisory_xact_lock")
+            && emit_def.contains("hashtext(p_queue_name)")
+            && emit_def.contains("hashtext(p_event_name)"),
+        "emit_event should lock on (queue, event) to avoid lost wakeups"
+    );
+
+    Ok(())
+}
+
+/// Stress test concurrent waits/emits to avoid lost wakeups under load.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_event_race_stress(pool: PgPool) -> sqlx::Result<()> {
+    let client = Arc::new(create_client(pool.clone(), "event_race").await);
+    client.create_queue(None).await.unwrap();
+    client.register::<EventWaitingTask>().await.unwrap();
+
+    let rounds = std::env::var("DURABLE_EVENT_RACE_ROUNDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(4);
+    let task_count = std::env::var("DURABLE_EVENT_RACE_TASKS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(128);
+    let jitter_ms = std::env::var("DURABLE_EVENT_RACE_JITTER_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8);
+
+    let worker = client
+        .start_worker(WorkerOptions {
+            concurrency: 8,
+            poll_interval: 0.01,
+            claim_timeout: 30,
+            ..Default::default()
+        })
+        .await;
+
+    for round in 0..rounds {
+        let mut spawned = Vec::with_capacity(task_count);
+        let mut emit_tasks = Vec::with_capacity(task_count);
+
+        for i in 0..task_count {
+            let event_name = format!("race_event_{round}_{i}");
+            let spawn_result = client
+                .spawn::<EventWaitingTask>(EventWaitParams {
+                    event_name: event_name.clone(),
+                    timeout_seconds: Some(4),
+                })
+                .await
+                .expect("Failed to spawn task");
+            spawned.push(spawn_result.task_id);
+
+            let client = Arc::clone(&client);
+            let delay_ms = ((i * 7 + round * 13) % jitter_ms) as u64;
+            emit_tasks.push(tokio::spawn(async move {
+                if delay_ms > 0 {
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                }
+                client
+                    .emit_event(&event_name, &json!({"ok": true}), None)
+                    .await
+            }));
+        }
+
+        for result in join_all(emit_tasks).await {
+            result
+                .expect("emit task join failed")
+                .expect("emit_event failed");
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let (orphaned_count,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) \
+             FROM durable.w_event_race w \
+             JOIN durable.e_event_race e ON e.event_name = w.event_name",
+        )
+        .fetch_one(&pool)
+        .await?;
+
+        if orphaned_count > 0 {
+            let rows: Vec<(String,)> = sqlx::query_as(
+                "SELECT w.event_name \
+                 FROM durable.w_event_race w \
+                 JOIN durable.e_event_race e ON e.event_name = w.event_name \
+                 ORDER BY w.created_at ASC \
+                 LIMIT 10",
+            )
+            .fetch_all(&pool)
+            .await?;
+
+            panic!(
+                "Detected {orphaned_count} waiters for already-emitted events (sample: {:?})",
+                rows
+            );
+        }
+
+        let wait_futures = spawned.iter().map(|task_id| {
+            wait_for_task_terminal(&pool, "event_race", *task_id, Duration::from_secs(12))
+        });
+        for result in join_all(wait_futures).await {
+            let terminal = result?;
+            assert_eq!(terminal, Some("completed".to_string()));
+        }
+    }
+
+    worker.shutdown().await;
+    Ok(())
+}
 
 /// Test that emit_event wakes a task blocked on await_event.
 #[sqlx::test(migrator = "MIGRATOR")]

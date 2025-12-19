@@ -1082,6 +1082,9 @@ begin
     raise exception 'event_name must be provided';
   end if;
 
+  -- Serialize await/emit per (queue, event) to avoid lost wakeups.
+  perform pg_advisory_xact_lock(hashtext(p_queue_name), hashtext(p_event_name));
+
   if p_timeout is not null then
     if p_timeout < 0 then
       raise exception 'timeout must be non-negative';
@@ -1236,6 +1239,9 @@ begin
   if p_event_name is null or length(trim(p_event_name)) = 0 then
     raise exception 'event_name must be provided';
   end if;
+
+  -- Serialize await/emit per (queue, event) to avoid lost wakeups.
+  perform pg_advisory_xact_lock(hashtext(p_queue_name), hashtext(p_event_name));
 
   -- insert the event into the events table
   execute format(
