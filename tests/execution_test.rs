@@ -7,7 +7,7 @@ use common::tasks::{
     MultiStepOutput, MultiStepTask, MultipleCallsOutput, MultipleConvenienceCallsTask,
     ResearchParams, ResearchResult, ResearchTask, ReservedPrefixTask,
 };
-use durable::{Durable, MIGRATOR, WorkerOptions};
+use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use std::borrow::Cow;
 use std::time::Duration;
@@ -584,6 +584,66 @@ async fn test_reserved_prefix_rejected(pool: PgPool) -> sqlx::Result<()> {
     // Task should have failed because $ prefix is reserved
     let state = get_task_state(&pool, "exec_reserved", spawn_result.task_id).await;
     assert_eq!(state, "failed", "Task using $ prefix should fail");
+
+    Ok(())
+}
+
+/// Test that reserved prefix validation produces correct error payload structure.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_reserved_prefix_error_payload(pool: PgPool) -> sqlx::Result<()> {
+    use common::helpers::get_failed_payload;
+
+    let client = create_client(pool.clone(), "exec_reserved_payload").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<ReservedPrefixTask>().await.unwrap();
+
+    let spawn_result = client
+        .spawn_with_options::<ReservedPrefixTask>(
+            (),
+            SpawnOptions {
+                retry_strategy: Some(RetryStrategy::None),
+                max_attempts: Some(1),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to spawn task");
+
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            ..Default::default()
+        })
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    worker.shutdown().await;
+
+    // Task should have failed because $ prefix is reserved
+    let state = get_task_state(&pool, "exec_reserved_payload", spawn_result.task_id).await;
+    assert_eq!(state, "failed", "Task using $ prefix should fail");
+
+    // Verify the error payload structure
+    let failed_payload =
+        get_failed_payload(&pool, "exec_reserved_payload", spawn_result.task_id).await?;
+    let failed_payload = failed_payload.expect("Should have failed_payload");
+
+    assert_eq!(
+        failed_payload.get("name").and_then(|v| v.as_str()),
+        Some("Validation"),
+        "Error name should be 'Validation'"
+    );
+
+    let message = failed_payload
+        .get("message")
+        .and_then(|v| v.as_str())
+        .expect("Should have message");
+    assert!(
+        message.contains("reserved") || message.contains("$"),
+        "Message should mention reserved prefix, got: {}",
+        message
+    );
 
     Ok(())
 }

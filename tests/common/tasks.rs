@@ -1304,3 +1304,87 @@ impl Task<()> for SpawnByNameTask {
         Ok(SpawnByNameOutput { child_result })
     }
 }
+
+// ============================================================================
+// JoinCancelledChildTask - Parent that spawns a slow child, then joins after child is cancelled
+// ============================================================================
+
+#[allow(dead_code)]
+pub struct JoinCancelledChildTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinCancelledChildParams {
+    pub child_sleep_ms: u64,
+}
+
+#[async_trait]
+impl Task<()> for JoinCancelledChildTask {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("join-cancelled-child")
+    }
+    type Params = JoinCancelledChildParams;
+    type Output = String;
+
+    async fn run(
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
+        // Spawn a slow child
+        let handle: TaskHandle<String> = ctx
+            .spawn::<SlowChildTask>(
+                "slow-child",
+                SlowChildParams {
+                    sleep_ms: params.child_sleep_ms,
+                },
+                Default::default(),
+            )
+            .await?;
+
+        // Wait a bit for the child to start (it will be cancelled externally)
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Try to join - should fail with ChildCancelled if child was cancelled
+        let result = ctx.join(handle).await?;
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// VerySlowChildTask - Very slow child task (for testing join timeout)
+// ============================================================================
+
+#[allow(dead_code)]
+pub struct VerySlowChildTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerySlowChildParams {
+    pub sleep_ms: u64,
+}
+
+#[async_trait]
+impl Task<()> for VerySlowChildTask {
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("very-slow-child")
+    }
+    type Params = VerySlowChildParams;
+    type Output = String;
+
+    async fn run(params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+        // Heartbeat regularly to keep this task alive
+        let interval_ms = 500;
+        let total_ms = params.sleep_ms;
+        let mut elapsed = 0u64;
+
+        while elapsed < total_ms {
+            let sleep_time = std::cmp::min(interval_ms, total_ms - elapsed);
+            tokio::time::sleep(std::time::Duration::from_millis(sleep_time)).await;
+            ctx.heartbeat(None).await?;
+            elapsed += sleep_time;
+        }
+
+        Ok("done".to_string())
+    }
+}

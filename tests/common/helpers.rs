@@ -224,3 +224,24 @@ pub async fn get_last_run_id(
         .await?;
     Ok(result.and_then(|(r,)| r))
 }
+
+/// Get the failure_reason for a task (the serialized error from the latest run).
+#[allow(dead_code)]
+pub async fn get_failed_payload(
+    pool: &PgPool,
+    queue: &str,
+    task_id: Uuid,
+) -> sqlx::Result<Option<serde_json::Value>> {
+    // Get the failure_reason from the last run
+    let query = AssertSqlSafe(format!(
+        "SELECT r.failure_reason FROM durable.r_{queue} r
+         JOIN durable.t_{queue} t ON t.last_attempt_run = r.run_id
+         WHERE t.task_id = $1",
+        queue = queue
+    ));
+    let result: Option<(Option<serde_json::Value>,)> = sqlx::query_as(query)
+        .bind(task_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(result.and_then(|(p,)| p))
+}

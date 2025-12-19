@@ -693,3 +693,101 @@ async fn test_emit_event_with_transaction_rollback(pool: PgPool) -> sqlx::Result
 
     Ok(())
 }
+
+// ============================================================================
+// Error Type Verification Tests
+// ============================================================================
+
+/// Test that event timeout produces correct error payload structure.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_event_timeout_error_payload(pool: PgPool) -> sqlx::Result<()> {
+    use common::helpers::get_failed_payload;
+
+    let client = create_client(pool.clone(), "event_timeout_payload").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<EventWaitingTask>().await.unwrap();
+
+    // Spawn task with short timeout, never emit event
+    let spawn_result = client
+        .spawn_with_options::<EventWaitingTask>(
+            EventWaitParams {
+                event_name: "never_arrives".to_string(),
+                timeout_seconds: Some(1),
+            },
+            SpawnOptions {
+                retry_strategy: Some(RetryStrategy::None),
+                max_attempts: Some(1),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to spawn task");
+
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            ..Default::default()
+        })
+        .await;
+
+    // Wait for task to fail due to timeout
+    let terminal = wait_for_task_terminal(
+        &pool,
+        "event_timeout_payload",
+        spawn_result.task_id,
+        Duration::from_secs(10),
+    )
+    .await?;
+    worker.shutdown().await;
+
+    assert_eq!(terminal, Some("failed".to_string()));
+
+    // Verify the error payload structure
+    let failed_payload = get_failed_payload(&pool, "event_timeout_payload", spawn_result.task_id)
+        .await?
+        .expect("Should have failed_payload");
+
+    assert_eq!(
+        failed_payload.get("name").and_then(|v| v.as_str()),
+        Some("Timeout"),
+        "Error name should be 'Timeout'"
+    );
+    assert_eq!(
+        failed_payload.get("step_name").and_then(|v| v.as_str()),
+        Some("never_arrives"),
+        "step_name should match event name"
+    );
+    assert!(
+        failed_payload.get("message").is_some(),
+        "Should have error message"
+    );
+
+    Ok(())
+}
+
+/// Test that emit_event with empty name fails with InvalidEventName error.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_emit_event_with_empty_name_fails(pool: PgPool) -> sqlx::Result<()> {
+    use durable::DurableError;
+
+    let client = create_client(pool.clone(), "event_empty_name").await;
+    client.create_queue(None).await.unwrap();
+
+    // Try to emit event with empty name
+    let result = client.emit_event("", &json!({"data": "test"}), None).await;
+
+    match result {
+        Err(DurableError::InvalidEventName { reason }) => {
+            assert!(
+                reason.contains("non-empty"),
+                "Error should mention non-empty requirement, got: {}",
+                reason
+            );
+        }
+        Err(e) => panic!("Expected InvalidEventName error, got: {:?}", e),
+        Ok(_) => panic!("Expected error, but emit_event succeeded"),
+    }
+
+    Ok(())
+}
