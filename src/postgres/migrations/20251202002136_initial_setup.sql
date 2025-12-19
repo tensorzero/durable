@@ -377,21 +377,25 @@ begin
       where t.task_id in (select task_id from to_cancel)',
     't_' || p_queue_name,
     't_' || p_queue_name
-  ) using v_now;
+t  ) using v_now;
 
-  -- Fail any run claims that have timed out
+  -- Fail any run claims that have timed out.
+  -- Lock tasks first to keep a consistent task -> run lock order.
   for v_expired_run in
     execute format(
-      'select run_id,
-              claimed_by,
-              claim_expires_at,
-              attempt
-         from durable.%I
-        where state = ''running''
-          and claim_expires_at is not null
-          and claim_expires_at <= $1
-        for update skip locked',
-      'r_' || p_queue_name
+      'select r.run_id,
+              r.task_id,
+              r.claimed_by,
+              r.claim_expires_at,
+              r.attempt
+         from durable.%I r
+         join durable.%I t on t.task_id = r.task_id
+        where r.state = ''running''
+          and r.claim_expires_at is not null
+          and r.claim_expires_at <= $1
+        for update of t skip locked',
+      'r_' || p_queue_name,
+      't_' || p_queue_name
     )
   using v_now
   loop
@@ -507,10 +511,39 @@ create function durable.complete_run (
 as $$
 declare
   v_task_id uuid;
+  v_task_id_locked uuid;
   v_state text;
   v_parent_task_id uuid;
   v_now timestamptz := durable.current_time();
 begin
+  -- Lock task first to keep a consistent task -> run lock order.
+  execute format(
+    'select task_id
+       from durable.%I
+      where run_id = $1',
+    'r_' || p_queue_name
+  )
+  into v_task_id
+  using p_run_id;
+
+  if v_task_id is null then
+    raise exception 'Run "%" not found in queue "%"', p_run_id, p_queue_name;
+  end if;
+
+  execute format(
+    'select task_id
+       from durable.%I
+      where task_id = $1
+      for update',
+    't_' || p_queue_name
+  )
+  into v_task_id_locked
+  using v_task_id;
+
+  if v_task_id_locked is null then
+    raise exception 'Task "%" not found in queue "%"', v_task_id, p_queue_name;
+  end if;
+
   execute format(
     'select task_id, state
        from durable.%I
@@ -518,11 +551,15 @@ begin
       for update',
     'r_' || p_queue_name
   )
-  into v_task_id, v_state
+  into v_task_id_locked, v_state
   using p_run_id;
 
-  if v_task_id is null then
+  if v_task_id_locked is null then
     raise exception 'Run "%" not found in queue "%"', p_run_id, p_queue_name;
+  end if;
+
+  if v_task_id_locked <> v_task_id then
+    raise exception 'Run "%" does not belong to task "%"', p_run_id, v_task_id;
   end if;
 
   if v_state <> 'running' then
@@ -582,15 +619,40 @@ declare
   v_existing_state jsonb;
   v_now timestamptz := durable.current_time();
   v_task_id uuid;
+  v_task_id_locked uuid;
+  v_run_task_id uuid;
 begin
+  -- Lock task first to keep a consistent task -> run lock order.
   -- Get task_id from run (needed for checkpoint table key)
   execute format(
-    'select task_id from durable.%I where run_id = $1 and state = ''running'' for update',
+    'select task_id from durable.%I where run_id = $1',
     'r_' || p_queue_name
   ) into v_task_id using p_run_id;
 
   if v_task_id is null then
     raise exception 'Run "%" is not currently running in queue "%"', p_run_id, p_queue_name;
+  end if;
+
+  execute format(
+    'select task_id from durable.%I where task_id = $1 for update',
+    't_' || p_queue_name
+  ) into v_task_id_locked using v_task_id;
+
+  if v_task_id_locked is null then
+    raise exception 'Task "%" not found in queue "%"', v_task_id, p_queue_name;
+  end if;
+
+  execute format(
+    'select task_id from durable.%I where run_id = $1 and state = ''running'' for update',
+    'r_' || p_queue_name
+  ) into v_run_task_id using p_run_id;
+
+  if v_run_task_id is null then
+    raise exception 'Run "%" is not currently running in queue "%"', p_run_id, p_queue_name;
+  end if;
+
+  if v_run_task_id <> v_task_id then
+    raise exception 'Run "%" does not belong to task "%"', p_run_id, v_task_id;
   end if;
 
   -- Check for existing checkpoint, else compute and store wake time
@@ -714,6 +776,7 @@ create function durable.fail_run (
 as $$
 declare
   v_task_id uuid;
+  v_run_task_id uuid;
   v_attempt integer;
   v_retry_strategy jsonb;
   v_max_attempts integer;
@@ -737,16 +800,15 @@ declare
   v_cancelled_at timestamptz := null;
   v_parent_task_id uuid;
 begin
-  -- find the run to fail
+  -- Lock task first to keep a consistent task -> run lock order.
+  -- Find task for this run (no lock).
   execute format(
-    'select r.task_id, r.attempt
-       from durable.%I r
-      where r.run_id = $1
-        and r.state in (''running'', ''sleeping'')
-      for update',
+    'select task_id
+       from durable.%I
+      where run_id = $1',
     'r_' || p_queue_name
   )
-  into v_task_id, v_attempt
+  into v_task_id
   using p_run_id;
 
   if v_task_id is null then
@@ -763,6 +825,26 @@ begin
   )
   into v_retry_strategy, v_max_attempts, v_first_started, v_cancellation, v_task_state, v_parent_task_id
   using v_task_id;
+
+  -- lock the run after the task lock and ensure it's still eligible
+  execute format(
+    'select task_id, attempt
+       from durable.%I
+      where run_id = $1
+        and state in (''running'', ''sleeping'')
+      for update',
+    'r_' || p_queue_name
+  )
+  into v_run_task_id, v_attempt
+  using p_run_id;
+
+  if v_run_task_id is null then
+    raise exception 'Run "%" cannot be failed in queue "%"', p_run_id, p_queue_name;
+  end if;
+
+  if v_run_task_id <> v_task_id then
+    raise exception 'Run "%" does not belong to task "%"', p_run_id, v_task_id;
+  end if;
 
   -- actually fail the run
   execute format(
