@@ -1,5 +1,6 @@
 use durable::{SpawnOptions, Task, TaskContext, TaskError, TaskHandle, TaskResult, async_trait};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -25,7 +26,9 @@ pub struct ResearchResult {
 
 #[async_trait]
 impl Task<()> for ResearchTask {
-    const NAME: &'static str = "research";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("research")
+    }
     type Params = ResearchParams;
     type Output = ResearchResult;
 
@@ -84,7 +87,9 @@ pub struct EchoParams {
 
 #[async_trait]
 impl Task<()> for EchoTask {
-    const NAME: &'static str = "echo";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("echo")
+    }
     type Params = EchoParams;
     type Output = String;
 
@@ -108,7 +113,9 @@ pub struct FailingParams {
 
 #[async_trait]
 impl Task<()> for FailingTask {
-    const NAME: &'static str = "failing";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("failing")
+    }
     type Params = FailingParams;
     type Output = ();
 
@@ -137,7 +144,9 @@ pub struct MultiStepOutput {
 
 #[async_trait]
 impl Task<()> for MultiStepTask {
-    const NAME: &'static str = "multi-step";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("multi-step")
+    }
     type Params = ();
     type Output = MultiStepOutput;
 
@@ -172,7 +181,9 @@ pub struct SleepParams {
 
 #[async_trait]
 impl Task<()> for SleepingTask {
-    const NAME: &'static str = "sleeping";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("sleeping")
+    }
     type Params = SleepParams;
     type Output = String;
 
@@ -203,7 +214,9 @@ pub struct EventWaitParams {
 
 #[async_trait]
 impl Task<()> for EventWaitingTask {
-    const NAME: &'static str = "event-waiting";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("event-waiting")
+    }
     type Params = EventWaitParams;
     type Output = serde_json::Value;
 
@@ -252,7 +265,9 @@ pub struct StepCountingOutput {
 
 #[async_trait]
 impl Task<()> for StepCountingTask {
-    const NAME: &'static str = "step-counting";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("step-counting")
+    }
     type Params = StepCountingParams;
     type Output = StepCountingOutput;
 
@@ -303,7 +318,9 @@ pub struct EmptyParamsTask;
 
 #[async_trait]
 impl Task<()> for EmptyParamsTask {
-    const NAME: &'static str = "empty-params";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("empty-params")
+    }
     type Params = ();
     type Output = String;
 
@@ -327,7 +344,9 @@ pub struct HeartbeatParams {
 
 #[async_trait]
 impl Task<()> for HeartbeatTask {
-    const NAME: &'static str = "heartbeat";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("heartbeat")
+    }
     type Params = HeartbeatParams;
     type Output = u32;
 
@@ -359,7 +378,9 @@ pub struct ConvenienceMethodsOutput {
 
 #[async_trait]
 impl Task<()> for ConvenienceMethodsTask {
-    const NAME: &'static str = "convenience-methods";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("convenience-methods")
+    }
     type Params = ();
     type Output = ConvenienceMethodsOutput;
 
@@ -398,7 +419,9 @@ pub struct MultipleCallsOutput {
 
 #[async_trait]
 impl Task<()> for MultipleConvenienceCallsTask {
-    const NAME: &'static str = "multiple-convenience-calls";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("multiple-convenience-calls")
+    }
     type Params = ();
     type Output = MultipleCallsOutput;
 
@@ -430,7 +453,9 @@ pub struct ReservedPrefixTask;
 
 #[async_trait]
 impl Task<()> for ReservedPrefixTask {
-    const NAME: &'static str = "reserved-prefix";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("reserved-prefix")
+    }
     type Params = ();
     type Output = ();
 
@@ -463,7 +488,9 @@ pub struct DoubleParams {
 
 #[async_trait]
 impl Task<()> for DoubleTask {
-    const NAME: &'static str = "double";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("double")
+    }
     type Params = DoubleParams;
     type Output = i32;
 
@@ -478,7 +505,9 @@ pub struct FailingChildTask;
 
 #[async_trait]
 impl Task<()> for FailingChildTask {
-    const NAME: &'static str = "failing-child";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("failing-child")
+    }
     type Params = ();
     type Output = ();
 
@@ -511,7 +540,9 @@ pub struct SingleSpawnOutput {
 
 #[async_trait]
 impl Task<()> for SingleSpawnTask {
-    const NAME: &'static str = "single-spawn";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("single-spawn")
+    }
     type Params = SingleSpawnParams;
     type Output = SingleSpawnOutput;
 
@@ -556,7 +587,9 @@ pub struct MultiSpawnOutput {
 
 #[async_trait]
 impl Task<()> for MultiSpawnTask {
-    const NAME: &'static str = "multi-spawn";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("multi-spawn")
+    }
     type Params = MultiSpawnParams;
     type Output = MultiSpawnOutput;
 
@@ -595,7 +628,9 @@ pub struct SpawnFailingChildTask;
 
 #[async_trait]
 impl Task<()> for SpawnFailingChildTask {
-    const NAME: &'static str = "spawn-failing-child";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("spawn-failing-child")
+    }
     type Params = ();
     type Output = ();
 
@@ -639,7 +674,9 @@ pub struct LongRunningHeartbeatParams {
 
 #[async_trait]
 impl Task<()> for LongRunningHeartbeatTask {
-    const NAME: &'static str = "long-running-heartbeat";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("long-running-heartbeat")
+    }
     type Params = LongRunningHeartbeatParams;
     type Output = String;
 
@@ -669,7 +706,9 @@ pub struct SlowChildParams {
 
 #[async_trait]
 impl Task<()> for SlowChildTask {
-    const NAME: &'static str = "slow-child";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("slow-child")
+    }
     type Params = SlowChildParams;
     type Output = String;
 
@@ -691,7 +730,9 @@ pub struct SpawnSlowChildParams {
 
 #[async_trait]
 impl Task<()> for SpawnSlowChildTask {
-    const NAME: &'static str = "spawn-slow-child";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("spawn-slow-child")
+    }
     type Params = SpawnSlowChildParams;
     type Output = String;
 
@@ -733,7 +774,9 @@ pub struct EventEmitterParams {
 
 #[async_trait]
 impl Task<()> for EventEmitterTask {
-    const NAME: &'static str = "event-emitter";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("event-emitter")
+    }
     type Params = EventEmitterParams;
     type Output = String;
 
@@ -758,7 +801,9 @@ pub struct ManyStepsParams {
 
 #[async_trait]
 impl Task<()> for ManyStepsTask {
-    const NAME: &'static str = "many-steps";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("many-steps")
+    }
     type Params = ManyStepsParams;
     type Output = u32;
 
@@ -792,7 +837,9 @@ pub struct LargePayloadParams {
 
 #[async_trait]
 impl Task<()> for LargePayloadTask {
-    const NAME: &'static str = "large-payload";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("large-payload")
+    }
     type Params = LargePayloadParams;
     type Output = String;
 
@@ -827,7 +874,9 @@ pub struct CpuBoundParams {
 
 #[async_trait]
 impl Task<()> for CpuBoundTask {
-    const NAME: &'static str = "cpu-bound";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("cpu-bound")
+    }
     type Params = CpuBoundParams;
     type Output = String;
 
@@ -861,7 +910,9 @@ pub struct SlowNoHeartbeatParams {
 
 #[async_trait]
 impl Task<()> for SlowNoHeartbeatTask {
-    const NAME: &'static str = "slow-no-heartbeat";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("slow-no-heartbeat")
+    }
     type Params = SlowNoHeartbeatParams;
     type Output = String;
 
@@ -952,7 +1003,9 @@ pub fn reset_deterministic_task_state() {
 
 #[async_trait]
 impl Task<()> for DeterministicReplayTask {
-    const NAME: &'static str = "deterministic-replay";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("deterministic-replay")
+    }
     type Params = DeterministicReplayParams;
     type Output = DeterministicReplayOutput;
 
@@ -1014,7 +1067,9 @@ pub struct EventThenFailParams {
 
 #[async_trait]
 impl Task<()> for EventThenFailTask {
-    const NAME: &'static str = "event-then-fail";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("event-then-fail")
+    }
     type Params = EventThenFailParams;
     type Output = serde_json::Value;
 
@@ -1064,7 +1119,9 @@ pub struct EventThenDelayParams {
 
 #[async_trait]
 impl Task<()> for EventThenDelayTask {
-    const NAME: &'static str = "event-then-delay";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("event-then-delay")
+    }
     type Params = EventThenDelayParams;
     type Output = serde_json::Value;
 
@@ -1101,7 +1158,9 @@ pub struct MultiEventParams {
 
 #[async_trait]
 impl Task<()> for MultiEventTask {
-    const NAME: &'static str = "multi-event";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("multi-event")
+    }
     type Params = MultiEventParams;
     type Output = serde_json::Value;
 
@@ -1144,7 +1203,9 @@ pub struct SpawnThenFailParams {
 
 #[async_trait]
 impl Task<()> for SpawnThenFailTask {
-    const NAME: &'static str = "spawn-then-fail";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("spawn-then-fail")
+    }
     type Params = SpawnThenFailParams;
     type Output = serde_json::Value;
 
@@ -1214,7 +1275,9 @@ pub struct SpawnByNameOutput {
 
 #[async_trait]
 impl Task<()> for SpawnByNameTask {
-    const NAME: &'static str = "spawn-by-name";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("spawn-by-name")
+    }
     type Params = SpawnByNameParams;
     type Output = SpawnByNameOutput;
 

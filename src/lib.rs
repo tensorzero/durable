@@ -23,7 +23,7 @@
 //!
 //! #[async_trait]
 //! impl Task<()> for MyTask {
-//!     const NAME: &'static str = "my-task";
+//!     fn name() -> Cow<'static, str> { Cow::Borrowed("my-task") }
 //!     type Params = MyParams;
 //!     type Output = MyOutput;
 //!
@@ -39,7 +39,7 @@
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
 //!     let client = Durable::new("postgres://localhost/myapp").await?;
-//!     client.register::<MyTask>().await;
+//!     client.register::<MyTask>().await?;
 //!
 //!     client.spawn::<MyTask>(MyParams { value: 21 }).await?;
 //!
@@ -65,7 +65,7 @@
 //!
 //! #[async_trait]
 //! impl Task<AppState> for FetchTask {
-//!     const NAME: &'static str = "fetch";
+//!     fn name() -> Cow<'static, str> { Cow::Borrowed("fetch") }
 //!     type Params = String;
 //!     type Output = String;
 //!

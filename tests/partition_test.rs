@@ -27,7 +27,7 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 async fn test_db_connection_lost_during_checkpoint(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "part_ckpt").await;
     client.create_queue(None).await.unwrap();
-    client.register::<StepCountingTask>().await;
+    client.register::<StepCountingTask>().await.unwrap();
 
     // Spawn a task that will fail after step 2 (simulating checkpoint failure)
     let spawn_result = client
@@ -87,7 +87,7 @@ async fn test_stale_worker_checkpoint_rejected(pool: PgPool) -> sqlx::Result<()>
 
     let client = create_client(pool.clone(), "part_stale").await;
     client.create_queue(None).await.unwrap();
-    client.register::<SlowNoHeartbeatTask>().await;
+    client.register::<SlowNoHeartbeatTask>().await.unwrap();
 
     let claim_timeout = 2; // Short lease
 

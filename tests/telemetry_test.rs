@@ -142,7 +142,7 @@ async fn test_task_lifecycle_metrics(pool: PgPool) -> sqlx::Result<()> {
 
     let client = create_client(pool.clone(), queue_name).await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     // Spawn a task
     let spawn_result = client
@@ -228,7 +228,7 @@ async fn test_task_failure_metrics(pool: PgPool) -> sqlx::Result<()> {
 
     let client = create_client(pool.clone(), "metrics_failure").await;
     client.create_queue(None).await.unwrap();
-    client.register::<FailingTask>().await;
+    client.register::<FailingTask>().await.unwrap();
 
     // Spawn a task that will fail
     let spawn_result = client
@@ -280,7 +280,7 @@ async fn test_worker_gauge_metrics(pool: PgPool) -> sqlx::Result<()> {
 
     let client = create_client(pool.clone(), queue_name).await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let worker = client
         .start_worker(WorkerOptions {
@@ -342,7 +342,7 @@ async fn test_checkpoint_metrics(pool: PgPool) -> sqlx::Result<()> {
 
     let client = create_client(pool.clone(), "metrics_checkpoint").await;
     client.create_queue(None).await.unwrap();
-    client.register::<MultiStepTask>().await;
+    client.register::<MultiStepTask>().await.unwrap();
 
     // MultiStepTask has steps which record checkpoint metrics
     let spawn_result = client
@@ -401,7 +401,7 @@ async fn test_task_execution_duration_metrics(pool: PgPool) -> sqlx::Result<()> 
 
     let client = create_client(pool.clone(), "metrics_exec_dur").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<EchoTask>(EchoParams {

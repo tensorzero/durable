@@ -561,7 +561,7 @@ where
         tracing::instrument(
             name = "durable.task.spawn",
             skip(self, params, options),
-            fields(task_id = %self.task_id, subtask_name = T::NAME)
+            fields(task_id = %self.task_id, subtask_name = %T::name())
         )
     )]
     pub async fn spawn<T>(
@@ -574,7 +574,7 @@ where
         T: Task<State>,
     {
         let params_json = serde_json::to_value(&params)?;
-        self.spawn_by_name(name, T::NAME, params_json, options)
+        self.spawn_by_name(name, &T::name(), params_json, options)
             .await
     }
 

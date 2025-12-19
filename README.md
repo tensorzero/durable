@@ -61,7 +61,7 @@ struct ResearchTask;
 
 #[async_trait]
 impl Task for ResearchTask {
-    const NAME: &'static str = "research";
+    fn name() -> Cow<'static, str> { Cow::Borrowed("research") }
     type Params = ResearchParams;
     type Output = ResearchResult;
 
@@ -108,7 +108,7 @@ async fn main() -> anyhow::Result<()> {
     client.create_queue(None).await?;
 
     // Register your task
-    client.register::<ResearchTask>().await;
+    client.register::<ResearchTask>().await?;
 
     // Spawn a task
     let result = client.spawn::<ResearchTask>(ResearchParams {
@@ -137,9 +137,9 @@ Tasks are defined by implementing the [`Task`] trait:
 ```rust
 #[async_trait]
 impl Task for MyTask {
-    const NAME: &'static str = "my-task";  // Unique identifier
-    type Params = MyParams;                 // Input (JSON-serializable)
-    type Output = MyOutput;                 // Output (JSON-serializable)
+    fn name() -> Cow<'static, str> { Cow::Borrowed("my-task") }  // Unique identifier
+    type Params = MyParams;                                       // Input (JSON-serializable)
+    type Output = MyOutput;                                       // Output (JSON-serializable)
 
     async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
         // Your task logic here

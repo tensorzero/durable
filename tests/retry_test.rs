@@ -26,7 +26,7 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 async fn test_retry_strategy_none_no_retry(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "retry_none").await;
     client.create_queue(None).await.unwrap();
-    client.register::<FailingTask>().await;
+    client.register::<FailingTask>().await.unwrap();
 
     // Spawn task with no retry strategy
     let spawn_result = client
@@ -74,7 +74,7 @@ async fn test_retry_strategy_none_no_retry(pool: PgPool) -> sqlx::Result<()> {
 async fn test_retry_strategy_fixed_delay(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "retry_fixed").await;
     client.create_queue(None).await.unwrap();
-    client.register::<FailingTask>().await;
+    client.register::<FailingTask>().await.unwrap();
 
     // Set fake time for deterministic testing
     let start_time = chrono::Utc::now();
@@ -150,7 +150,7 @@ async fn test_retry_strategy_fixed_delay(pool: PgPool) -> sqlx::Result<()> {
 async fn test_retry_strategy_exponential_backoff(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "retry_exp").await;
     client.create_queue(None).await.unwrap();
-    client.register::<FailingTask>().await;
+    client.register::<FailingTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -233,7 +233,7 @@ async fn test_retry_strategy_exponential_backoff(pool: PgPool) -> sqlx::Result<(
 async fn test_max_attempts_honored(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "retry_max").await;
     client.create_queue(None).await.unwrap();
-    client.register::<FailingTask>().await;
+    client.register::<FailingTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;

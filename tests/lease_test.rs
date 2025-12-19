@@ -28,7 +28,7 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 async fn test_claim_sets_correct_expiry(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "lease_claim").await;
     client.create_queue(None).await.unwrap();
-    client.register::<LongRunningHeartbeatTask>().await;
+    client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -86,7 +86,7 @@ async fn test_claim_sets_correct_expiry(pool: PgPool) -> sqlx::Result<()> {
 async fn test_heartbeat_extends_lease(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "lease_hb").await;
     client.create_queue(None).await.unwrap();
-    client.register::<LongRunningHeartbeatTask>().await;
+    client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -160,7 +160,7 @@ async fn test_checkpoint_extends_lease(pool: PgPool) -> sqlx::Result<()> {
 
     let client = create_client(pool.clone(), "lease_ckpt").await;
     client.create_queue(None).await.unwrap();
-    client.register::<ManyStepsTask>().await;
+    client.register::<ManyStepsTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -230,7 +230,7 @@ async fn test_checkpoint_extends_lease(pool: PgPool) -> sqlx::Result<()> {
 async fn test_heartbeat_detects_cancellation(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "lease_cancel").await;
     client.create_queue(None).await.unwrap();
-    client.register::<LongRunningHeartbeatTask>().await;
+    client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
     // Spawn a long-running task
     let spawn_result = client

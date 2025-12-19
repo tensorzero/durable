@@ -27,7 +27,7 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 async fn test_emit_event_wakes_waiter(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "event_wake").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await;
+    client.register::<EventWaitingTask>().await.unwrap();
 
     // Spawn task that waits for an event
     let spawn_result = client
@@ -94,7 +94,7 @@ async fn test_emit_event_wakes_waiter(pool: PgPool) -> sqlx::Result<()> {
 async fn test_event_already_emitted_returns_immediately(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "event_pre").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await;
+    client.register::<EventWaitingTask>().await.unwrap();
 
     // Emit the event BEFORE spawning the task
     client
@@ -150,7 +150,7 @@ async fn test_event_already_emitted_returns_immediately(pool: PgPool) -> sqlx::R
 async fn test_event_timeout_triggers(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "event_timeout").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await;
+    client.register::<EventWaitingTask>().await.unwrap();
 
     // Spawn task with short timeout, never emit event
     let spawn_result = client
@@ -197,7 +197,7 @@ async fn test_event_timeout_triggers(pool: PgPool) -> sqlx::Result<()> {
 async fn test_multiple_waiters_same_event(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "event_multi").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await;
+    client.register::<EventWaitingTask>().await.unwrap();
 
     // Spawn multiple tasks waiting for the same event
     let task1 = client
@@ -269,7 +269,7 @@ async fn test_event_payload_preserved_on_retry(pool: PgPool) -> sqlx::Result<()>
 
     let client = create_client(pool.clone(), "event_retry").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EventThenFailTask>().await;
+    client.register::<EventThenFailTask>().await.unwrap();
 
     reset_event_then_fail_state();
 
@@ -335,7 +335,7 @@ async fn test_event_payload_preserved_on_retry(pool: PgPool) -> sqlx::Result<()>
 async fn test_event_last_write_wins(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "event_dedup").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await;
+    client.register::<EventWaitingTask>().await.unwrap();
 
     // Emit the event twice with different payloads
     client
@@ -397,7 +397,7 @@ async fn test_multiple_distinct_events(pool: PgPool) -> sqlx::Result<()> {
 
     let client = create_client(pool.clone(), "event_distinct").await;
     client.create_queue(None).await.unwrap();
-    client.register::<MultiEventTask>().await;
+    client.register::<MultiEventTask>().await.unwrap();
 
     // Spawn task that waits for two events
     let spawn_result = client
@@ -467,7 +467,7 @@ async fn test_event_write_does_not_propagate_after_wake(pool: PgPool) -> sqlx::R
 
     let client = create_client(pool.clone(), "event_no_propagate").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EventThenDelayTask>().await;
+    client.register::<EventThenDelayTask>().await.unwrap();
 
     // Spawn task that waits for event, then delays before completing
     let spawn_result = client
@@ -536,8 +536,8 @@ async fn test_event_write_does_not_propagate_after_wake(pool: PgPool) -> sqlx::R
 async fn test_emit_from_different_task(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "event_cross").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await;
-    client.register::<EventEmitterTask>().await;
+    client.register::<EventWaitingTask>().await.unwrap();
+    client.register::<EventEmitterTask>().await.unwrap();
 
     // Spawn the waiter task first
     let waiter = client

@@ -33,7 +33,7 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 async fn test_crash_mid_step_resumes_from_checkpoint(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "crash_ckpt").await;
     client.create_queue(None).await.unwrap();
-    client.register::<StepCountingTask>().await;
+    client.register::<StepCountingTask>().await.unwrap();
 
     // Spawn a task that will fail after step 2
     let spawn_result = client
@@ -111,7 +111,7 @@ async fn test_crash_mid_step_resumes_from_checkpoint(pool: PgPool) -> sqlx::Resu
 async fn test_worker_drop_without_shutdown(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "crash_drop").await;
     client.create_queue(None).await.unwrap();
-    client.register::<SlowNoHeartbeatTask>().await;
+    client.register::<SlowNoHeartbeatTask>().await.unwrap();
 
     let claim_timeout = 2; // 2 second lease
 
@@ -179,7 +179,7 @@ async fn test_worker_drop_without_shutdown(pool: PgPool) -> sqlx::Result<()> {
 async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "crash_lease").await;
     client.create_queue(None).await.unwrap();
-    client.register::<LongRunningHeartbeatTask>().await;
+    client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -246,7 +246,7 @@ async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> 
 async fn test_heartbeat_prevents_lease_expiration(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "crash_hb").await;
     client.create_queue(None).await.unwrap();
-    client.register::<LongRunningHeartbeatTask>().await;
+    client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
     let claim_timeout = 2; // 2 second lease
 
@@ -298,8 +298,8 @@ async fn test_spawn_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
 
     let client = create_client(pool.clone(), "crash_spawn").await;
     client.create_queue(None).await.unwrap();
-    client.register::<SingleSpawnTask>().await;
-    client.register::<DoubleTask>().await; // Child task type
+    client.register::<SingleSpawnTask>().await.unwrap();
+    client.register::<DoubleTask>().await.unwrap(); // Child task type
 
     // Spawn parent task that spawns a child
     let spawn_result = client
@@ -361,7 +361,7 @@ async fn test_spawn_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
 async fn test_step_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "crash_step").await;
     client.create_queue(None).await.unwrap();
-    client.register::<StepCountingTask>().await;
+    client.register::<StepCountingTask>().await.unwrap();
 
     // Spawn task that fails after step 2, then succeeds on retry
     // But fail_after_step2 is always true, so it will fail on retries too
@@ -423,7 +423,7 @@ async fn test_step_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
 async fn test_cpu_bound_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "crash_cpu").await;
     client.create_queue(None).await.unwrap();
-    client.register::<CpuBoundTask>().await;
+    client.register::<CpuBoundTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -483,7 +483,7 @@ async fn test_cpu_bound_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
 async fn test_slow_task_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "crash_slow").await;
     client.create_queue(None).await.unwrap();
-    client.register::<SlowNoHeartbeatTask>().await;
+    client.register::<SlowNoHeartbeatTask>().await.unwrap();
 
     let claim_timeout = 2; // 2 second lease
 
