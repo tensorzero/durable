@@ -279,7 +279,7 @@ where
     /// Returns an error if a task with the same name is already registered.
     pub async fn register<T: Task<State>>(&self) -> anyhow::Result<&Self> {
         let mut registry = self.registry.write().await;
-        let name = T::NAME.to_string();
+        let name = T::name();
         if registry.contains_key(&name) {
             anyhow::bail!(
                 "Task '{}' is already registered. Each task name must be unique.",
@@ -302,7 +302,7 @@ where
         params: T::Params,
         options: SpawnOptions,
     ) -> anyhow::Result<SpawnResult> {
-        self.spawn_by_name(T::NAME, serde_json::to_value(&params)?, options)
+        self.spawn_by_name(&T::name(), serde_json::to_value(&params)?, options)
             .await
     }
 
@@ -371,9 +371,14 @@ where
         T: Task<State>,
         E: Executor<'e, Database = Postgres>,
     {
-        // Type-safe spawn uses T::NAME which is already registered
-        self.spawn_by_name_internal(executor, T::NAME, serde_json::to_value(&params)?, options)
-            .await
+        // Type-safe spawn uses T::name() which is already registered
+        self.spawn_by_name_internal(
+            executor,
+            &T::name(),
+            serde_json::to_value(&params)?,
+            options,
+        )
+        .await
     }
 
     /// Spawn a task by name using a custom executor.

@@ -9,6 +9,7 @@ use common::tasks::{
 };
 use durable::{Durable, MIGRATOR, WorkerOptions};
 use sqlx::{AssertSqlSafe, PgPool};
+use std::borrow::Cow;
 use std::time::Duration;
 
 /// Helper to create a Durable client from the test pool.
@@ -657,7 +658,9 @@ struct WriteToDbParams {
 
 #[durable::async_trait]
 impl durable::Task<AppState> for WriteToDbTask {
-    const NAME: &'static str = "write-to-db";
+    fn name() -> Cow<'static, str> {
+        Cow::Borrowed("write-to-db")
+    }
     type Params = WriteToDbParams;
     type Output = i64;
 

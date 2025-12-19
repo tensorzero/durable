@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value as JsonValue;
+use std::borrow::Cow;
 use std::marker::PhantomData;
 
 use crate::context::TaskContext;
@@ -24,7 +25,7 @@ use crate::error::{TaskError, TaskResult};
 ///
 /// #[async_trait]
 /// impl Task<()> for SendEmailTask {
-///     const NAME: &'static str = "send-email";
+///     fn name() -> Cow<'static, str> { Cow::Borrowed("send-email") }
 ///     type Params = SendEmailParams;
 ///     type Output = SendEmailResult;
 ///
@@ -47,7 +48,7 @@ use crate::error::{TaskError, TaskResult};
 ///
 /// #[async_trait]
 /// impl Task<AppState> for FetchUrlTask {
-///     const NAME: &'static str = "fetch-url";
+///     fn name() -> Cow<'static, str> { Cow::Borrowed("fetch-url") }
 ///     type Params = String;
 ///     type Output = String;
 ///
@@ -67,7 +68,7 @@ where
 {
     /// Task name as stored in the database.
     /// Should be unique across your application.
-    const NAME: &'static str;
+    fn name() -> Cow<'static, str>;
 
     /// Parameter type (must be JSON-serializable)
     type Params: Serialize + DeserializeOwned + Send;
@@ -101,7 +102,7 @@ pub trait ErasedTask<State>: Send + Sync
 where
     State: Clone + Send + Sync + 'static,
 {
-    fn name(&self) -> &'static str;
+    fn name(&self) -> Cow<'static, str>;
     async fn execute(
         &self,
         params: JsonValue,
@@ -116,8 +117,8 @@ where
     T: Task<State>,
     State: Clone + Send + Sync + 'static,
 {
-    fn name(&self) -> &'static str {
-        T::NAME
+    fn name(&self) -> Cow<'static, str> {
+        T::name()
     }
 
     async fn execute(
@@ -133,4 +134,5 @@ where
 }
 
 /// Type alias for the task registry
-pub type TaskRegistry<State> = std::collections::HashMap<String, &'static dyn ErasedTask<State>>;
+pub type TaskRegistry<State> =
+    std::collections::HashMap<Cow<'static, str>, &'static dyn ErasedTask<State>>;
