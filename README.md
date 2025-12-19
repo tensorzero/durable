@@ -151,13 +151,17 @@ impl Task for MyTask {
 
 The [`TaskContext`] provides methods for durable execution:
 
-- **`step(name, closure)`** - Execute a checkpointed operation. If the step completed in a previous run, returns the cached result.
+- **`step(name, params, closure)`** - Execute a checkpointed operation. The closure receives `(params, state)`. If the step completed in a previous run with the same name and params, returns the cached result.
 - **`spawn::<T>(name, params, options)`** - Spawn a subtask and return a handle.
+- **`spawn_by_name(name, task_name, params, options)`** - Spawn a subtask by task name (dynamic version).
 - **`join(handle)`** - Wait for a subtask to complete and get its result.
 - **`sleep_for(name, duration)`** - Suspend the task for a duration.
 - **`await_event(name, timeout)`** - Wait for an external event.
 - **`emit_event(name, payload)`** - Emit an event to wake waiting tasks.
 - **`heartbeat(duration)`** - Extend the task lease for long operations.
+- **`rand()`** - Generate a durable random value in [0, 1). Checkpointed.
+- **`now()`** - Get the current time as a durable checkpoint.
+- **`uuid7()`** - Generate a durable UUIDv7. Checkpointed.
 
 ### Checkpointing
 
