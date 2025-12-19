@@ -1156,7 +1156,7 @@ begin
   end if;
 
   -- Serialize await/emit per (queue, event) to avoid lost wakeups.
-  perform pg_advisory_xact_lock(hashtext(p_queue_name), hashtext(p_event_name));
+  perform durable.lock_event(p_queue_name, p_event_name);
 
   if p_timeout is not null then
     if p_timeout < 0 then
@@ -1314,7 +1314,7 @@ begin
   end if;
 
   -- Serialize await/emit per (queue, event) to avoid lost wakeups.
-  perform pg_advisory_xact_lock(hashtext(p_queue_name), hashtext(p_event_name));
+  perform durable.lock_event(p_queue_name, p_event_name);
 
   -- insert the event into the events table
   execute format(
@@ -1576,6 +1576,18 @@ begin
 
   return v_deleted_count;
 end;
+$$;
+
+-- Acquires a transaction-scoped advisory lock for event synchronization.
+-- Used to serialize await_event/emit_event operations on the same (queue, event) pair.
+create function durable.lock_event (
+  p_queue_name text,
+  p_event_name text
+)
+  returns void
+  language sql
+as $$
+  select pg_advisory_xact_lock(hashtext(p_queue_name), hashtext(p_event_name));
 $$;
 
 -- utility function to generate a uuidv7 even for older postgres versions.
