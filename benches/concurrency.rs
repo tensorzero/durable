@@ -31,7 +31,7 @@ fn bench_concurrent_claims(c: &mut Criterion) {
 
                         for _ in 0..iters {
                             let ctx = BenchContext::new().await;
-                            ctx.client.register::<QuickTask>().await;
+                            ctx.client.register::<QuickTask>().await.unwrap();
 
                             // Spawn all tasks
                             for i in 0..num_tasks {
@@ -50,7 +50,7 @@ fn bench_concurrent_claims(c: &mut Criterion) {
                             // Spawn multiple worker processes
                             for _ in 0..num_workers {
                                 let client = ctx.new_client().await;
-                                client.register::<QuickTask>().await;
+                                client.register::<QuickTask>().await.unwrap();
                                 let barrier = barrier.clone();
 
                                 let handle = tokio::spawn(async move {
@@ -119,7 +119,7 @@ fn bench_claim_latency_distribution(c: &mut Criterion) {
 
                         for _ in 0..iters {
                             let ctx = BenchContext::new().await;
-                            ctx.client.register::<QuickTask>().await;
+                            ctx.client.register::<QuickTask>().await.unwrap();
 
                             // Spawn tasks
                             for i in 0..num_tasks {
@@ -136,7 +136,7 @@ fn bench_claim_latency_distribution(c: &mut Criterion) {
 
                             for _ in 0..num_workers {
                                 let client = ctx.new_client().await;
-                                client.register::<QuickTask>().await;
+                                client.register::<QuickTask>().await.unwrap();
                                 let barrier = barrier.clone();
 
                                 let handle = tokio::spawn(async move {

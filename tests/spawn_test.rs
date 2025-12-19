@@ -25,7 +25,7 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 async fn test_spawn_returns_valid_ids(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_test").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let result = client
         .spawn::<EchoTask>(EchoParams {
@@ -46,7 +46,7 @@ async fn test_spawn_returns_valid_ids(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_multiple_tasks_get_unique_ids(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_multi").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let result1 = client
         .spawn::<EchoTask>(EchoParams {
@@ -79,7 +79,7 @@ async fn test_spawn_multiple_tasks_get_unique_ids(pool: PgPool) -> sqlx::Result<
 async fn test_spawn_with_custom_max_attempts(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_attempts").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let options = SpawnOptions {
         max_attempts: Some(10),
@@ -106,7 +106,7 @@ async fn test_spawn_with_custom_max_attempts(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_with_retry_strategy_none(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_retry_none").await;
     client.create_queue(None).await.unwrap();
-    client.register::<FailingTask>().await;
+    client.register::<FailingTask>().await.unwrap();
 
     let options = SpawnOptions {
         retry_strategy: Some(RetryStrategy::None),
@@ -132,7 +132,7 @@ async fn test_spawn_with_retry_strategy_none(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_with_retry_strategy_fixed(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_retry_fixed").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let options = SpawnOptions {
         retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 10 }),
@@ -158,7 +158,7 @@ async fn test_spawn_with_retry_strategy_fixed(pool: PgPool) -> sqlx::Result<()> 
 async fn test_spawn_with_retry_strategy_exponential(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_retry_exp").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let options = SpawnOptions {
         retry_strategy: Some(RetryStrategy::Exponential {
@@ -188,7 +188,7 @@ async fn test_spawn_with_retry_strategy_exponential(pool: PgPool) -> sqlx::Resul
 async fn test_spawn_with_headers(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_headers").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let mut headers = HashMap::new();
     headers.insert("correlation_id".to_string(), serde_json::json!("abc-123"));
@@ -218,7 +218,7 @@ async fn test_spawn_with_headers(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_with_cancellation_policy(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_cancel").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let options = SpawnOptions {
         cancellation: Some(CancellationPolicy {
@@ -251,7 +251,7 @@ async fn test_spawn_with_cancellation_policy(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_by_name(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_by_name").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let params = serde_json::json!({
         "message": "dynamic spawn"
@@ -271,7 +271,7 @@ async fn test_spawn_by_name(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_by_name_with_options(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_by_name_opts").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let params = serde_json::json!({
         "message": "value"
@@ -301,7 +301,7 @@ async fn test_spawn_by_name_with_options(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_with_empty_params(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_empty").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     // Empty object is valid JSON params for EchoTask (message will be missing but that's ok for this test)
     let result = client
@@ -318,7 +318,7 @@ async fn test_spawn_with_empty_params(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_with_complex_params(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_complex").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     // Complex nested JSON structure - the params don't need to match the task's Params type
     // because spawn_by_name accepts arbitrary JSON
@@ -360,7 +360,7 @@ async fn test_client_default_max_attempts(pool: PgPool) -> sqlx::Result<()> {
         .expect("Failed to create client");
 
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     // Spawn without specifying max_attempts - should use default of 3
     let result = client
@@ -383,7 +383,7 @@ async fn test_client_default_max_attempts(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_with_transaction_commit(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_tx_commit").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     // Create a test table
     sqlx::query("CREATE TABLE test_orders (id UUID PRIMARY KEY, status TEXT)")
@@ -436,7 +436,7 @@ async fn test_spawn_with_transaction_commit(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_with_transaction_rollback(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "spawn_tx_rollback").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     // Create a test table
     sqlx::query("CREATE TABLE test_orders_rb (id UUID PRIMARY KEY, status TEXT)")
@@ -496,7 +496,7 @@ async fn test_spawn_with_transaction_rollback(pool: PgPool) -> sqlx::Result<()> 
 async fn test_spawn_rejects_reserved_header_prefix(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "reserved_headers").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let mut headers = HashMap::new();
     headers.insert("durable::custom".to_string(), serde_json::json!("value"));
@@ -530,7 +530,7 @@ async fn test_spawn_rejects_reserved_header_prefix(pool: PgPool) -> sqlx::Result
 async fn test_spawn_allows_non_reserved_headers(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "allowed_headers").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let mut headers = HashMap::new();
     // These should all be allowed - they don't start with "durable::"
@@ -556,6 +556,36 @@ async fn test_spawn_allows_non_reserved_headers(pool: PgPool) -> sqlx::Result<()
         result.is_ok(),
         "Headers without 'durable::' prefix should be allowed"
     );
+
+    Ok(())
+}
+
+// ============================================================================
+// Registration Tests
+// ============================================================================
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_register_duplicate_task_errors(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "register_dup").await;
+
+    // First registration should succeed
+    client
+        .register::<EchoTask>()
+        .await
+        .expect("First registration should succeed");
+
+    // Second registration of the same task should fail
+    let result2 = client.register::<EchoTask>().await;
+    match result2 {
+        Ok(_) => panic!("Duplicate registration should fail"),
+        Err(err) => {
+            assert!(
+                err.to_string().contains("already registered"),
+                "Error message should mention 'already registered', got: {}",
+                err
+            );
+        }
+    }
 
     Ok(())
 }

@@ -31,7 +31,7 @@ fn bench_step_cache_miss(c: &mut Criterion) {
 
                         for _ in 0..iters {
                             let ctx = BenchContext::new().await;
-                            ctx.client.register::<MultiStepBenchTask>().await;
+                            ctx.client.register::<MultiStepBenchTask>().await.unwrap();
 
                             ctx.client
                                 .spawn::<MultiStepBenchTask>(MultiStepParams { num_steps })
@@ -80,7 +80,7 @@ fn bench_step_cache_hit(c: &mut Criterion) {
 
                         for _ in 0..iters {
                             let ctx = BenchContext::new().await;
-                            ctx.client.register::<MultiStepBenchTask>().await;
+                            ctx.client.register::<MultiStepBenchTask>().await.unwrap();
 
                             // First run to populate checkpoints
                             let spawn_result = ctx
@@ -166,7 +166,10 @@ fn bench_large_payload_checkpoint(c: &mut Criterion) {
 
                         for _ in 0..iters {
                             let ctx = BenchContext::new().await;
-                            ctx.client.register::<LargePayloadBenchTask>().await;
+                            ctx.client
+                                .register::<LargePayloadBenchTask>()
+                                .await
+                                .unwrap();
 
                             ctx.client
                                 .spawn::<LargePayloadBenchTask>(LargePayloadParams { payload_size })

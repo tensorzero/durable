@@ -29,7 +29,7 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 async fn test_task_claimed_by_exactly_one_worker(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "conc_claim").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     // Spawn a single task
     let spawn_result = client
@@ -50,7 +50,7 @@ async fn test_task_claimed_by_exactly_one_worker(pool: PgPool) -> sqlx::Result<(
 
         let worker_handle = tokio::spawn(async move {
             let client = create_client(pool_clone, "conc_claim").await;
-            client.register::<EchoTask>().await;
+            client.register::<EchoTask>().await.unwrap();
 
             // Synchronize all workers to start at the same time
             barrier_clone.wait().await;
@@ -122,7 +122,7 @@ async fn test_task_claimed_by_exactly_one_worker(pool: PgPool) -> sqlx::Result<(
 async fn test_concurrent_claims_with_skip_locked(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "conc_skip").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     // Spawn many tasks
     let num_tasks = 50;
@@ -149,7 +149,7 @@ async fn test_concurrent_claims_with_skip_locked(pool: PgPool) -> sqlx::Result<(
 
         let handle = tokio::spawn(async move {
             let client = create_client(pool_clone, "conc_skip").await;
-            client.register::<EchoTask>().await;
+            client.register::<EchoTask>().await.unwrap();
 
             // Synchronize all workers to start at the same time
             barrier_clone.wait().await;

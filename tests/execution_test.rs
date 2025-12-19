@@ -69,7 +69,7 @@ async fn get_task_result(
 async fn test_simple_task_executes_and_completes(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "exec_simple").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     // Spawn a task
     let spawn_result = client
@@ -111,7 +111,7 @@ async fn test_simple_task_executes_and_completes(pool: PgPool) -> sqlx::Result<(
 async fn test_task_state_transitions(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "exec_states").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     // Spawn a task
     let spawn_result = client
@@ -149,7 +149,7 @@ async fn test_task_state_transitions(pool: PgPool) -> sqlx::Result<()> {
 async fn test_empty_params_task_executes(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "exec_empty").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EmptyParamsTask>().await;
+    client.register::<EmptyParamsTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<EmptyParamsTask>(())
@@ -186,7 +186,7 @@ async fn test_empty_params_task_executes(pool: PgPool) -> sqlx::Result<()> {
 async fn test_multi_step_task_completes_all_steps(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "exec_steps").await;
     client.create_queue(None).await.unwrap();
-    client.register::<MultiStepTask>().await;
+    client.register::<MultiStepTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<MultiStepTask>(())
@@ -228,7 +228,7 @@ async fn test_multi_step_task_completes_all_steps(pool: PgPool) -> sqlx::Result<
 async fn test_multiple_tasks_execute_concurrently(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "exec_concurrent").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     // Spawn multiple tasks
     let mut task_ids = Vec::new();
@@ -269,7 +269,7 @@ async fn test_multiple_tasks_execute_concurrently(pool: PgPool) -> sqlx::Result<
 async fn test_worker_concurrency_limit_respected(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "exec_limit").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     // Spawn more tasks than concurrency limit
     for i in 0..10 {
@@ -311,7 +311,7 @@ async fn test_worker_concurrency_limit_respected(pool: PgPool) -> sqlx::Result<(
 async fn test_worker_graceful_shutdown_waits(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "exec_shutdown").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<EchoTask>(EchoParams {
@@ -380,7 +380,7 @@ async fn test_unregistered_task_fails(pool: PgPool) -> sqlx::Result<()> {
 async fn test_task_result_stored_correctly(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "exec_result").await;
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await;
+    client.register::<EchoTask>().await.unwrap();
 
     let test_message = "This is a test message with special chars: <>&\"'";
 
@@ -418,7 +418,7 @@ async fn test_task_result_stored_correctly(pool: PgPool) -> sqlx::Result<()> {
 async fn test_research_task_readme_example(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "exec_research").await;
     client.create_queue(None).await.unwrap();
-    client.register::<ResearchTask>().await;
+    client.register::<ResearchTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<ResearchTask>(ResearchParams {
@@ -468,7 +468,7 @@ async fn test_research_task_readme_example(pool: PgPool) -> sqlx::Result<()> {
 async fn test_convenience_methods_execute(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "exec_convenience").await;
     client.create_queue(None).await.unwrap();
-    client.register::<ConvenienceMethodsTask>().await;
+    client.register::<ConvenienceMethodsTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<ConvenienceMethodsTask>(())
@@ -516,7 +516,10 @@ async fn test_multiple_convenience_calls_produce_different_values(
 ) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "exec_multi_convenience").await;
     client.create_queue(None).await.unwrap();
-    client.register::<MultipleConvenienceCallsTask>().await;
+    client
+        .register::<MultipleConvenienceCallsTask>()
+        .await
+        .unwrap();
 
     let spawn_result = client
         .spawn::<MultipleConvenienceCallsTask>(())
@@ -559,7 +562,7 @@ async fn test_multiple_convenience_calls_produce_different_values(
 async fn test_reserved_prefix_rejected(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "exec_reserved").await;
     client.create_queue(None).await.unwrap();
-    client.register::<ReservedPrefixTask>().await;
+    client.register::<ReservedPrefixTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<ReservedPrefixTask>(())
@@ -594,7 +597,7 @@ async fn test_long_running_task_with_heartbeat_completes(pool: PgPool) -> sqlx::
 
     let client = create_client(pool.clone(), "exec_heartbeat_timer").await;
     client.create_queue(None).await.unwrap();
-    client.register::<LongRunningHeartbeatTask>().await;
+    client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
     // Run a task for 3 seconds with 1 second claim_timeout
     // Task heartbeats every 200ms, so it should stay alive
@@ -711,7 +714,7 @@ async fn test_task_uses_application_state(pool: PgPool) -> sqlx::Result<()> {
     // Create client with application state
     let client = create_client_with_state(pool.clone(), "exec_state").await;
     client.create_queue(None).await.unwrap();
-    client.register::<WriteToDbTask>().await;
+    client.register::<WriteToDbTask>().await.unwrap();
 
     // Spawn a task that will use the state to write to the database
     let spawn_result = client

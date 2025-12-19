@@ -92,8 +92,8 @@ async fn get_parent_task_id(
 async fn test_spawn_single_child_and_join(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "fanout_single").await;
     client.create_queue(None).await.unwrap();
-    client.register::<SingleSpawnTask>().await;
-    client.register::<DoubleTask>().await;
+    client.register::<SingleSpawnTask>().await.unwrap();
+    client.register::<DoubleTask>().await.unwrap();
 
     // Spawn parent task
     let spawn_result = client
@@ -138,8 +138,8 @@ async fn test_spawn_single_child_and_join(pool: PgPool) -> sqlx::Result<()> {
 async fn test_spawn_multiple_children_and_join(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "fanout_multi").await;
     client.create_queue(None).await.unwrap();
-    client.register::<MultiSpawnTask>().await;
-    client.register::<DoubleTask>().await;
+    client.register::<MultiSpawnTask>().await.unwrap();
+    client.register::<DoubleTask>().await.unwrap();
 
     // Spawn parent task with multiple values
     let spawn_result = client
@@ -191,8 +191,8 @@ async fn test_spawn_multiple_children_and_join(pool: PgPool) -> sqlx::Result<()>
 async fn test_child_has_parent_task_id(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "fanout_parent").await;
     client.create_queue(None).await.unwrap();
-    client.register::<SingleSpawnTask>().await;
-    client.register::<DoubleTask>().await;
+    client.register::<SingleSpawnTask>().await.unwrap();
+    client.register::<DoubleTask>().await.unwrap();
 
     // Spawn parent task
     let spawn_result = client
@@ -247,8 +247,8 @@ async fn test_child_has_parent_task_id(pool: PgPool) -> sqlx::Result<()> {
 async fn test_child_failure_propagates_to_parent(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "fanout_fail").await;
     client.create_queue(None).await.unwrap();
-    client.register::<SpawnFailingChildTask>().await;
-    client.register::<FailingChildTask>().await;
+    client.register::<SpawnFailingChildTask>().await.unwrap();
+    client.register::<FailingChildTask>().await.unwrap();
 
     // Spawn parent task that will spawn a failing child
     // Use max_attempts=1 for both parent and child to avoid long retry waits
@@ -291,8 +291,8 @@ async fn test_child_failure_propagates_to_parent(pool: PgPool) -> sqlx::Result<(
 async fn test_cascade_cancel_when_parent_cancelled(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "fanout_cancel").await;
     client.create_queue(None).await.unwrap();
-    client.register::<SpawnSlowChildTask>().await;
-    client.register::<SlowChildTask>().await;
+    client.register::<SpawnSlowChildTask>().await.unwrap();
+    client.register::<SlowChildTask>().await.unwrap();
 
     // Spawn parent task that will spawn a slow child (5 seconds)
     let spawn_result = client
@@ -358,8 +358,8 @@ async fn test_cascade_cancel_when_parent_cancelled(pool: PgPool) -> sqlx::Result
 async fn test_spawn_by_name_from_task_context(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "fanout_by_name").await;
     client.create_queue(None).await.unwrap();
-    client.register::<SpawnByNameTask>().await;
-    client.register::<DoubleTask>().await;
+    client.register::<SpawnByNameTask>().await.unwrap();
+    client.register::<DoubleTask>().await.unwrap();
 
     // Spawn parent task that will use spawn_by_name internally
     let spawn_result = client

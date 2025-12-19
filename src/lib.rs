@@ -39,7 +39,7 @@
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
 //!     let client = Durable::new("postgres://localhost/myapp").await?;
-//!     client.register::<MyTask>().await;
+//!     client.register::<MyTask>().await?;
 //!
 //!     client.spawn::<MyTask>(MyParams { value: 21 }).await?;
 //!

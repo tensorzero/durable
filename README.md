@@ -102,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     // Register your task
-    client.register::<ResearchTask>().await;
+    client.register::<ResearchTask>().await?;
 
     // Spawn a task
     let result = client.spawn::<ResearchTask>(ResearchParams {

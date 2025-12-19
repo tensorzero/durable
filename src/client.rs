@@ -101,7 +101,7 @@ fn validate_headers(headers: &Option<HashMap<String, JsonValue>>) -> anyhow::Res
 ///     .build_with_state(app_state)
 ///     .await?;
 ///
-/// client.register::<MyTask>().await;
+/// client.register::<MyTask>().await?;
 /// client.spawn::<MyTask>(params).await?;
 /// ```
 pub struct Durable<State = ()>
@@ -275,10 +275,19 @@ where
     }
 
     /// Register a task type. Required before spawning or processing.
-    pub async fn register<T: Task<State>>(&self) -> &Self {
+    ///
+    /// Returns an error if a task with the same name is already registered.
+    pub async fn register<T: Task<State>>(&self) -> anyhow::Result<&Self> {
         let mut registry = self.registry.write().await;
-        registry.insert(T::NAME.to_string(), &PhantomData::<T>);
-        self
+        let name = T::NAME.to_string();
+        if registry.contains_key(&name) {
+            anyhow::bail!(
+                "Task '{}' is already registered. Each task name must be unique.",
+                name
+            );
+        }
+        registry.insert(name, &PhantomData::<T>);
+        Ok(self)
     }
 
     /// Spawn a task (type-safe version)
