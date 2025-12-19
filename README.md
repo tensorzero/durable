@@ -41,7 +41,7 @@ durable = "0.1"
 ## Quick Start
 
 ```rust
-use durable::{Durable, Task, TaskContext, TaskResult, WorkerOptions, async_trait};
+use durable::{Durable, MIGRATOR, Task, TaskContext, TaskResult, WorkerOptions, async_trait};
 use serde::{Deserialize, Serialize};
 
 // Define your task parameters and output
@@ -101,6 +101,12 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
+    // Run migrations (idempotent - safe to call on every startup)
+    MIGRATOR.run(client.pool()).await?;
+
+    // Create the queue (idempotent - safe to call on every startup)
+    client.create_queue(None).await?;
+
     // Register your task
     client.register::<ResearchTask>().await?;
 
@@ -147,7 +153,7 @@ The [`TaskContext`] provides methods for durable execution:
 
 - **`step(name, closure)`** - Execute a checkpointed operation. If the step completed in a previous run, returns the cached result.
 - **`spawn::<T>(name, params, options)`** - Spawn a subtask and return a handle.
-- **`join(name, handle)`** - Wait for a subtask to complete and get its result.
+- **`join(handle)`** - Wait for a subtask to complete and get its result.
 - **`sleep_for(name, duration)`** - Suspend the task for a duration.
 - **`await_event(name, timeout)`** - Wait for an external event.
 - **`emit_event(name, payload)`** - Emit an event to wake waiting tasks.
@@ -200,8 +206,8 @@ async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Out
     let local = ctx.step("local-work", (), |_params, _state| async { Ok(compute()) }).await?;
 
     // Wait for subtask results
-    let r1: ItemResult = ctx.join("item-1", h1).await?;
-    let r2: ItemResult = ctx.join("item-2", h2).await?;
+    let r1: ItemResult = ctx.join(h1).await?;
+    let r2: ItemResult = ctx.join(h2).await?;
 
     Ok(Output { local, children: vec![r1, r2] })
 }
