@@ -77,9 +77,9 @@ where
 /// Validate that a user-provided step name doesn't use reserved prefix.
 fn validate_user_name(name: &str) -> TaskResult<()> {
     if name.starts_with('$') {
-        return Err(TaskError::Failed(anyhow::anyhow!(
-            "Step names cannot start with '$' (reserved for internal use)"
-        )));
+        return Err(TaskError::Validation {
+            message: "Step names cannot start with '$' (reserved for internal use)".to_string(),
+        });
     }
     Ok(())
 }
@@ -371,9 +371,9 @@ where
         // Check if we were woken by this event but it timed out (null payload)
         if self.task.wake_event.as_deref() == Some(event_name) && self.task.event_payload.is_none()
         {
-            return Err(TaskError::Failed(anyhow::anyhow!(
-                "Timed out waiting for event \"{event_name}\""
-            )));
+            return Err(TaskError::Timeout {
+                step_name: event_name.to_string(),
+            });
         }
 
         // Call await_event stored procedure
@@ -419,9 +419,9 @@ where
     )]
     pub async fn emit_event<T: Serialize>(&self, event_name: &str, payload: &T) -> TaskResult<()> {
         if event_name.is_empty() {
-            return Err(TaskError::Failed(anyhow::anyhow!(
-                "event_name must be non-empty"
-            )));
+            return Err(TaskError::Validation {
+                message: "event_name must be non-empty".to_string(),
+            });
         }
 
         let payload_json = serde_json::to_value(payload)?;
@@ -497,7 +497,9 @@ where
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
             let stored: String = serde_json::from_value(cached.clone())?;
             return Ok(DateTime::parse_from_rfc3339(&stored)
-                .map_err(|e| TaskError::Failed(anyhow::anyhow!("Invalid stored time: {e}")))?
+                .map_err(|e| TaskError::Validation {
+                    message: format!("Invalid stored time: {e}"),
+                })?
                 .with_timezone(&Utc));
         }
         let value = Utc::now();
@@ -631,10 +633,12 @@ where
         if let Some(ref headers) = options.headers {
             for key in headers.keys() {
                 if key.starts_with("durable::") {
-                    return Err(TaskError::Failed(anyhow::anyhow!(
-                        "Header key '{}' uses reserved prefix 'durable::'. User headers cannot start with 'durable::'.",
-                        key
-                    )));
+                    return Err(TaskError::Validation {
+                        message: format!(
+                            "Header key '{}' uses reserved prefix 'durable::'. User headers cannot start with 'durable::'.",
+                            key
+                        ),
+                    });
                 }
             }
         }
@@ -649,10 +653,12 @@ where
         {
             let registry = self.registry.read().await;
             if !registry.contains_key(task_name) {
-                return Err(TaskError::Failed(anyhow::anyhow!(
-                    "Unknown task: {}. Task must be registered before spawning.",
-                    task_name
-                )));
+                return Err(TaskError::Validation {
+                    message: format!(
+                        "Unknown task: {}. Task must be registered before spawning.",
+                        task_name
+                    ),
+                });
             }
         }
 
@@ -730,15 +736,15 @@ where
         // Check cache for already-received event
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
             let payload: ChildCompletePayload = serde_json::from_value(cached.clone())?;
-            return Self::process_child_payload(payload);
+            return Self::process_child_payload(&step_name, payload);
         }
 
         // Check if we were woken by this event but it timed out (null payload)
         if self.task.wake_event.as_deref() == Some(&event_name) && self.task.event_payload.is_none()
         {
-            return Err(TaskError::Failed(anyhow::anyhow!(
-                "Timed out waiting for child task to complete"
-            )));
+            return Err(TaskError::Timeout {
+                step_name: step_name.to_string(),
+            });
         }
 
         // Call await_event stored procedure (no timeout for join - we wait indefinitely)
@@ -765,30 +771,34 @@ where
             .insert(checkpoint_name, payload_json.clone());
 
         let payload: ChildCompletePayload = serde_json::from_value(payload_json)?;
-        Self::process_child_payload(payload)
+        Self::process_child_payload(&step_name, payload)
     }
 
     /// Process the child completion payload and return the appropriate result.
-    fn process_child_payload<T: DeserializeOwned>(payload: ChildCompletePayload) -> TaskResult<T> {
+    fn process_child_payload<T: DeserializeOwned>(
+        step_name: &str,
+        payload: ChildCompletePayload,
+    ) -> TaskResult<T> {
         match payload.status {
             ChildStatus::Completed => {
-                let result = payload.result.ok_or_else(|| {
-                    TaskError::Failed(anyhow::anyhow!("Child completed but no result available"))
+                let result = payload.result.ok_or_else(|| TaskError::Validation {
+                    message: "Child completed but no result available".to_string(),
                 })?;
                 Ok(serde_json::from_value(result)?)
             }
             ChildStatus::Failed => {
-                let msg = payload
+                let message = payload
                     .error
                     .and_then(|e| e.get("message").and_then(|m| m.as_str()).map(String::from))
-                    .unwrap_or_else(|| "Child task failed".to_string());
-                Err(TaskError::Failed(anyhow::anyhow!(
-                    "Child task failed: {msg}",
-                )))
+                    .unwrap_or_else(|| "Unknown error".to_string());
+                Err(TaskError::ChildFailed {
+                    step_name: step_name.to_string(),
+                    message,
+                })
             }
-            ChildStatus::Cancelled => Err(TaskError::Failed(anyhow::anyhow!(
-                "Child task was cancelled"
-            ))),
+            ChildStatus::Cancelled => Err(TaskError::ChildCancelled {
+                step_name: step_name.to_string(),
+            }),
         }
     }
 }
