@@ -461,9 +461,9 @@ async fn test_event_payload_preserved_on_retry(pool: PgPool) -> sqlx::Result<()>
     Ok(())
 }
 
-/// Test that emitting an event with the same name updates the payload (last-write-wins).
+/// Test that emitting an event with the same name keeps the first payload (first-writer-wins).
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn test_event_last_write_wins(pool: PgPool) -> sqlx::Result<()> {
+async fn test_event_first_writer_wins(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "event_dedup").await;
     client.create_queue(None).await.unwrap();
     client.register::<EventWaitingTask>().await.unwrap();
@@ -507,7 +507,7 @@ async fn test_event_last_write_wins(pool: PgPool) -> sqlx::Result<()> {
 
     assert_eq!(terminal, Some("completed".to_string()));
 
-    // Should receive the second payload (last-write-wins)
+    // Should receive the first payload (first-writer-wins)
     let query = AssertSqlSafe(
         "SELECT completed_payload FROM durable.t_event_dedup WHERE task_id = $1".to_string(),
     );
@@ -516,7 +516,7 @@ async fn test_event_last_write_wins(pool: PgPool) -> sqlx::Result<()> {
         .fetch_one(&pool)
         .await?;
 
-    assert_eq!(result.0, json!({"version": "second"}));
+    assert_eq!(result.0, json!({"version": "first"}));
 
     Ok(())
 }

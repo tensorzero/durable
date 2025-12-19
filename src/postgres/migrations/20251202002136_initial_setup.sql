@@ -1310,6 +1310,7 @@ as $$
 declare
   v_now timestamptz := durable.current_time();
   v_payload jsonb := coalesce(p_payload, 'null'::jsonb);
+  v_inserted_count integer;
 begin
   if p_event_name is null or length(trim(p_event_name)) = 0 then
     raise exception 'event_name must be provided';
@@ -1318,15 +1319,22 @@ begin
   -- Serialize await/emit per (queue, event) to avoid lost wakeups.
   perform durable.lock_event(p_queue_name, p_event_name);
 
-  -- insert the event into the events table
+  -- Insert the event into the events table (first-writer-wins).
+  -- If the event already exists, do nothing - the first payload is kept.
   execute format(
     'insert into durable.%I (event_name, payload, emitted_at)
      values ($1, $2, $3)
-     on conflict (event_name)
-     do update set payload = excluded.payload,
-                   emitted_at = excluded.emitted_at',
+     on conflict (event_name) do nothing',
     'e_' || p_queue_name
   ) using p_event_name, v_payload, v_now;
+
+  get diagnostics v_inserted_count = row_count;
+
+  -- Only wake waiters if we actually inserted (first emit).
+  -- Subsequent emits are no-ops to maintain consistency.
+  if v_inserted_count = 0 then
+    return;
+  end if;
 
   execute format(
     'with expired_waits as (
