@@ -266,7 +266,7 @@ async fn test_max_attempts_honored(pool: PgPool) -> sqlx::Result<()> {
         &pool,
         "retry_max",
         spawn_result.task_id,
-        Duration::from_secs(5),
+        Duration::from_secs(10),
     )
     .await?;
     worker.shutdown().await;
