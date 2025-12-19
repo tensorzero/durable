@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use crate::error::{DurableError, DurableResult};
 use crate::task::{Task, TaskRegistry};
 use crate::types::{
     CancellationPolicy, RetryStrategy, SpawnOptions, SpawnResult, SpawnResultRow, WorkerOptions,
@@ -49,14 +50,11 @@ impl CancellationPolicyDb {
 use crate::worker::Worker;
 
 /// Validates that user-provided headers don't use reserved prefixes.
-fn validate_headers(headers: &Option<HashMap<String, JsonValue>>) -> anyhow::Result<()> {
+fn validate_headers(headers: &Option<HashMap<String, JsonValue>>) -> DurableResult<()> {
     if let Some(headers) = headers {
         for key in headers.keys() {
             if key.starts_with("durable::") {
-                anyhow::bail!(
-                    "Header key '{}' uses reserved prefix 'durable::'. User headers cannot start with 'durable::'.",
-                    key
-                );
+                return Err(DurableError::ReservedHeaderPrefix { key: key.clone() });
             }
         }
     }
@@ -180,7 +178,7 @@ impl DurableBuilder {
     ///
     /// Use this when your tasks don't need access to shared resources
     /// like HTTP clients or database pools.
-    pub async fn build(self) -> anyhow::Result<Durable<()>> {
+    pub async fn build(self) -> DurableResult<Durable<()>> {
         self.build_with_state(()).await
     }
 
@@ -209,7 +207,7 @@ impl DurableBuilder {
     ///     .build_with_state(state)
     ///     .await?;
     /// ```
-    pub async fn build_with_state<State>(self, state: State) -> anyhow::Result<Durable<State>>
+    pub async fn build_with_state<State>(self, state: State) -> DurableResult<Durable<State>>
     where
         State: Clone + Send + Sync + 'static,
     {
@@ -242,7 +240,7 @@ impl Default for DurableBuilder {
 
 impl Durable<()> {
     /// Create a new client with default settings (no application state).
-    pub async fn new(database_url: &str) -> anyhow::Result<Self> {
+    pub async fn new(database_url: &str) -> DurableResult<Self> {
         DurableBuilder::new()
             .database_url(database_url)
             .build()
@@ -277,21 +275,20 @@ where
     /// Register a task type. Required before spawning or processing.
     ///
     /// Returns an error if a task with the same name is already registered.
-    pub async fn register<T: Task<State>>(&self) -> anyhow::Result<&Self> {
+    pub async fn register<T: Task<State>>(&self) -> DurableResult<&Self> {
         let mut registry = self.registry.write().await;
         let name = T::name();
         if registry.contains_key(&name) {
-            anyhow::bail!(
-                "Task '{}' is already registered. Each task name must be unique.",
-                name
-            );
+            return Err(DurableError::TaskAlreadyRegistered {
+                task_name: name.to_string(),
+            });
         }
         registry.insert(name, &PhantomData::<T>);
         Ok(self)
     }
 
     /// Spawn a task (type-safe version)
-    pub async fn spawn<T: Task<State>>(&self, params: T::Params) -> anyhow::Result<SpawnResult> {
+    pub async fn spawn<T: Task<State>>(&self, params: T::Params) -> DurableResult<SpawnResult> {
         self.spawn_with_options::<T>(params, SpawnOptions::default())
             .await
     }
@@ -301,7 +298,7 @@ where
         &self,
         params: T::Params,
         options: SpawnOptions,
-    ) -> anyhow::Result<SpawnResult> {
+    ) -> DurableResult<SpawnResult> {
         self.spawn_by_name(&T::name(), serde_json::to_value(&params)?, options)
             .await
     }
@@ -314,15 +311,15 @@ where
         task_name: &str,
         params: JsonValue,
         options: SpawnOptions,
-    ) -> anyhow::Result<SpawnResult> {
+    ) -> DurableResult<SpawnResult> {
         // Validate that the task is registered
         {
             let registry = self.registry.read().await;
-            anyhow::ensure!(
-                registry.contains_key(task_name),
-                "Unknown task: {}. Task must be registered before spawning.",
-                task_name
-            );
+            if !registry.contains_key(task_name) {
+                return Err(DurableError::TaskNotRegistered {
+                    task_name: task_name.to_string(),
+                });
+            }
         }
 
         self.spawn_by_name_internal(&self.pool, task_name, params, options)
@@ -351,7 +348,7 @@ where
         &self,
         executor: E,
         params: T::Params,
-    ) -> anyhow::Result<SpawnResult>
+    ) -> DurableResult<SpawnResult>
     where
         T: Task<State>,
         E: Executor<'e, Database = Postgres>,
@@ -366,7 +363,7 @@ where
         executor: E,
         params: T::Params,
         options: SpawnOptions,
-    ) -> anyhow::Result<SpawnResult>
+    ) -> DurableResult<SpawnResult>
     where
         T: Task<State>,
         E: Executor<'e, Database = Postgres>,
@@ -398,18 +395,18 @@ where
         task_name: &str,
         params: JsonValue,
         options: SpawnOptions,
-    ) -> anyhow::Result<SpawnResult>
+    ) -> DurableResult<SpawnResult>
     where
         E: Executor<'e, Database = Postgres>,
     {
         // Validate that the task is registered
         {
             let registry = self.registry.read().await;
-            anyhow::ensure!(
-                registry.contains_key(task_name),
-                "Unknown task: {}. Task must be registered before spawning.",
-                task_name
-            );
+            if !registry.contains_key(task_name) {
+                return Err(DurableError::TaskNotRegistered {
+                    task_name: task_name.to_string(),
+                });
+            }
         }
 
         self.spawn_by_name_internal(executor, task_name, params, options)
@@ -424,7 +421,7 @@ where
         task_name: &str,
         params: JsonValue,
         mut options: SpawnOptions,
-    ) -> anyhow::Result<SpawnResult>
+    ) -> DurableResult<SpawnResult>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -483,7 +480,7 @@ where
     }
 
     /// Create a queue (defaults to this client's queue name)
-    pub async fn create_queue(&self, queue_name: Option<&str>) -> anyhow::Result<()> {
+    pub async fn create_queue(&self, queue_name: Option<&str>) -> DurableResult<()> {
         let queue = queue_name.unwrap_or(&self.queue_name);
         let query = "SELECT durable.create_queue($1)";
         sqlx::query(query).bind(queue).execute(&self.pool).await?;
@@ -491,7 +488,7 @@ where
     }
 
     /// Drop a queue and all its data
-    pub async fn drop_queue(&self, queue_name: Option<&str>) -> anyhow::Result<()> {
+    pub async fn drop_queue(&self, queue_name: Option<&str>) -> DurableResult<()> {
         let queue = queue_name.unwrap_or(&self.queue_name);
         let query = "SELECT durable.drop_queue($1)";
         sqlx::query(query).bind(queue).execute(&self.pool).await?;
@@ -499,7 +496,7 @@ where
     }
 
     /// List all queues
-    pub async fn list_queues(&self) -> anyhow::Result<Vec<String>> {
+    pub async fn list_queues(&self) -> DurableResult<Vec<String>> {
         let query = "SELECT queue_name FROM durable.list_queues()";
         let rows: Vec<(String,)> = sqlx::query_as(query).fetch_all(&self.pool).await?;
         Ok(rows.into_iter().map(|(name,)| name).collect())
@@ -519,7 +516,7 @@ where
         event_name: &str,
         payload: &T,
         queue_name: Option<&str>,
-    ) -> anyhow::Result<()> {
+    ) -> DurableResult<()> {
         self.emit_event_with(&self.pool, event_name, payload, queue_name)
             .await
     }
@@ -556,12 +553,16 @@ where
         event_name: &str,
         payload: &T,
         queue_name: Option<&str>,
-    ) -> anyhow::Result<()>
+    ) -> DurableResult<()>
     where
         T: Serialize,
         E: Executor<'e, Database = Postgres>,
     {
-        anyhow::ensure!(!event_name.is_empty(), "event_name must be non-empty");
+        if event_name.is_empty() {
+            return Err(DurableError::InvalidEventName {
+                reason: "event_name must be non-empty".to_string(),
+            });
+        }
 
         let queue = queue_name.unwrap_or(&self.queue_name);
 
@@ -586,7 +587,7 @@ where
 
     /// Cancel a task by ID. Running tasks will be cancelled at
     /// their next checkpoint or heartbeat.
-    pub async fn cancel_task(&self, task_id: Uuid, queue_name: Option<&str>) -> anyhow::Result<()> {
+    pub async fn cancel_task(&self, task_id: Uuid, queue_name: Option<&str>) -> DurableResult<()> {
         let queue = queue_name.unwrap_or(&self.queue_name);
         let query = "SELECT durable.cancel_task($1, $2)";
         sqlx::query(query)
@@ -610,10 +611,9 @@ where
     }
 
     /// Close the client. Closes the pool if owned.
-    pub async fn close(self) -> anyhow::Result<()> {
+    pub async fn close(self) {
         if self.owns_pool {
             self.pool.close().await;
         }
-        Ok(())
     }
 }

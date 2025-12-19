@@ -120,7 +120,7 @@ impl Task<()> for FailingTask {
     type Output = ();
 
     async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
-        Err(TaskError::Failed(anyhow::anyhow!(
+        Err(TaskError::TaskInternal(anyhow::anyhow!(
             "{}",
             params.error_message
         )))
@@ -290,7 +290,7 @@ impl Task<()> for StepCountingTask {
             .await?;
 
         if params.fail_after_step2 {
-            return Err(TaskError::Failed(anyhow::anyhow!(
+            return Err(TaskError::TaskInternal(anyhow::anyhow!(
                 "Intentional failure after step2"
             )));
         }
@@ -512,7 +512,7 @@ impl Task<()> for FailingChildTask {
     type Output = ();
 
     async fn run(_params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
-        Err(TaskError::Failed(anyhow::anyhow!(
+        Err(TaskError::TaskInternal(anyhow::anyhow!(
             "Child task failed intentionally"
         )))
     }
@@ -1031,7 +1031,9 @@ impl Task<()> for DeterministicReplayTask {
             });
 
             if should_fail {
-                return Err(TaskError::Failed(anyhow::anyhow!("First attempt failure")));
+                return Err(TaskError::TaskInternal(anyhow::anyhow!(
+                    "First attempt failure"
+                )));
             }
         }
 
@@ -1093,7 +1095,7 @@ impl Task<()> for EventThenFailTask {
         });
 
         if should_fail {
-            return Err(TaskError::Failed(anyhow::anyhow!(
+            return Err(TaskError::TaskInternal(anyhow::anyhow!(
                 "First attempt failure after event"
             )));
         }
@@ -1239,7 +1241,7 @@ impl Task<()> for SpawnThenFailTask {
         });
 
         if should_fail {
-            return Err(TaskError::Failed(anyhow::anyhow!(
+            return Err(TaskError::TaskInternal(anyhow::anyhow!(
                 "First attempt failure after spawn"
             )));
         }

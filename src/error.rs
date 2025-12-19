@@ -28,7 +28,22 @@ pub enum ControlFlow {
 ///
 /// - `Control(Suspend)` - Task is waiting; worker does nothing (scheduler will resume it)
 /// - `Control(Cancelled)` - Task was cancelled; worker does nothing
-/// - `Failed(_)` - Actual error; worker records failure and may retry
+/// - All other variants - Actual errors; worker records failure and may retry
+///
+/// # Example
+///
+/// ```ignore
+/// match ctx.await_event::<MyPayload>("my-event", Some(Duration::from_secs(30))).await {
+///     Ok(payload) => { /* handle payload */ }
+///     Err(TaskError::Timeout { step_name }) => {
+///         println!("Timed out waiting for {}", step_name);
+///     }
+///     Err(TaskError::Control(ControlFlow::Cancelled)) => {
+///         println!("Task was cancelled");
+///     }
+///     Err(e) => { /* handle other errors */ }
+/// }
+/// ```
 #[derive(Debug, Error)]
 pub enum TaskError {
     /// Control flow signal - not an actual error.
@@ -37,12 +52,65 @@ pub enum TaskError {
     #[error("control flow: {0:?}")]
     Control(ControlFlow),
 
-    /// An error occurred during task execution.
+    /// The operation timed out.
     ///
-    /// The worker will record this failure and may retry the task based on
-    /// the configured [`RetryStrategy`](crate::RetryStrategy).
+    /// Returned by [`TaskContext::await_event`](crate::TaskContext::await_event) when
+    /// a timeout is specified and the event doesn't arrive in time, or by
+    /// [`TaskContext::join`](crate::TaskContext::join) when waiting for a child task.
+    #[error("timed out waiting for '{step_name}'")]
+    Timeout {
+        /// The name of the step or event that timed out.
+        step_name: String,
+    },
+
+    /// Database operation failed.
+    ///
+    /// This includes connection errors, query failures, and transaction issues.
+    #[error("database error: {0}")]
+    Database(sqlx::Error),
+
+    /// JSON serialization or deserialization failed.
+    #[error("serialization error: {0}")]
+    Serialization(serde_json::Error),
+
+    /// A child task failed.
+    ///
+    /// Returned by [`TaskContext::join`](crate::TaskContext::join) when the child
+    /// task completed with an error.
+    #[error("child task failed at '{step_name}': {message}")]
+    ChildFailed {
+        /// The step name used when joining the child task.
+        step_name: String,
+        /// The error message from the child task.
+        message: String,
+    },
+
+    /// A child task was cancelled.
+    ///
+    /// Returned by [`TaskContext::join`](crate::TaskContext::join) when the child
+    /// task was cancelled before completion.
+    #[error("child task was cancelled at '{step_name}'")]
+    ChildCancelled {
+        /// The step name used when joining the child task.
+        step_name: String,
+    },
+
+    /// A validation error occurred.
+    ///
+    /// This includes errors like reserved step name prefixes, empty event names,
+    /// reserved header prefixes, and unregistered task names.
+    #[error("{message}")]
+    Validation {
+        /// A description of the validation error.
+        message: String,
+    },
+
+    /// An error from user task code.
+    ///
+    /// This is the catch-all variant for errors returned by task implementations.
+    /// Use `anyhow::anyhow!()` or `?` on any error type to create this variant.
     #[error(transparent)]
-    Failed(#[from] anyhow::Error),
+    TaskInternal(#[from] anyhow::Error),
 }
 
 /// Result type alias for task execution.
@@ -52,7 +120,7 @@ pub type TaskResult<T> = Result<T, TaskError>;
 
 impl From<serde_json::Error> for TaskError {
     fn from(err: serde_json::Error) -> Self {
-        TaskError::Failed(err.into())
+        TaskError::Serialization(err)
     }
 }
 
@@ -61,7 +129,7 @@ impl From<sqlx::Error> for TaskError {
         if is_cancelled_error(&err) {
             TaskError::Control(ControlFlow::Cancelled)
         } else {
-            TaskError::Failed(err.into())
+            TaskError::Database(err)
         }
     }
 }
@@ -75,11 +143,137 @@ pub fn is_cancelled_error(err: &sqlx::Error) -> bool {
     }
 }
 
-/// Serialize error for storage in fail_run
-pub fn serialize_error(err: &anyhow::Error) -> JsonValue {
-    serde_json::json!({
-        "name": "Error",
-        "message": err.to_string(),
-        "backtrace": format!("{:?}", err)
-    })
+/// Serialize a TaskError for storage in fail_run
+pub fn serialize_task_error(err: &TaskError) -> JsonValue {
+    match err {
+        TaskError::Control(_) => {
+            // Control flow signals should never be serialized as failures
+            serde_json::json!({
+                "name": "ControlFlow",
+                "message": err.to_string(),
+            })
+        }
+        TaskError::Timeout { step_name } => {
+            serde_json::json!({
+                "name": "Timeout",
+                "message": err.to_string(),
+                "step_name": step_name,
+            })
+        }
+        TaskError::Database(e) => {
+            serde_json::json!({
+                "name": "Database",
+                "message": e.to_string(),
+            })
+        }
+        TaskError::Serialization(e) => {
+            serde_json::json!({
+                "name": "Serialization",
+                "message": e.to_string(),
+            })
+        }
+        TaskError::ChildFailed { step_name, message } => {
+            serde_json::json!({
+                "name": "ChildFailed",
+                "message": message,
+                "step_name": step_name,
+            })
+        }
+        TaskError::ChildCancelled { step_name } => {
+            serde_json::json!({
+                "name": "ChildCancelled",
+                "message": err.to_string(),
+                "step_name": step_name,
+            })
+        }
+        TaskError::Validation { message } => {
+            serde_json::json!({
+                "name": "Validation",
+                "message": message,
+            })
+        }
+        TaskError::TaskInternal(e) => {
+            serde_json::json!({
+                "name": "TaskInternal",
+                "message": e.to_string(),
+                "backtrace": format!("{:?}", e)
+            })
+        }
+    }
 }
+
+/// Error type for Client API operations.
+///
+/// This enum covers all errors that can occur when using the [`Durable`](crate::Durable) client
+/// to spawn tasks, manage queues, and emit events. Unlike [`TaskError`], which is used
+/// during task execution and intentionally wraps `anyhow::Error` for flexibility,
+/// `DurableError` provides typed variants that callers can match on.
+///
+/// # Example
+///
+/// ```ignore
+/// match client.spawn::<MyTask>(params).await {
+///     Ok(result) => println!("Spawned task {}", result.task_id),
+///     Err(DurableError::Database(e)) => eprintln!("Database error: {}", e),
+///     Err(DurableError::TaskNotRegistered { task_name }) => {
+///         eprintln!("Task {} not registered", task_name);
+///     }
+///     Err(e) => eprintln!("Other error: {}", e),
+/// }
+/// ```
+#[derive(Debug, Error)]
+pub enum DurableError {
+    /// Database operation failed.
+    ///
+    /// This includes connection errors, query failures, pool exhaustion, and transaction issues.
+    #[error("database error: {0}")]
+    Database(#[from] sqlx::Error),
+
+    /// JSON serialization or deserialization failed.
+    ///
+    /// Occurs when task parameters or event payloads cannot be serialized to JSON.
+    #[error("serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+
+    /// Task is not registered with this client.
+    ///
+    /// Tasks must be registered via [`Durable::register`](crate::Durable::register) before spawning.
+    #[error("Unknown task: '{task_name}'. Task must be registered before spawning.")]
+    TaskNotRegistered {
+        /// The name of the task that was not found in the registry.
+        task_name: String,
+    },
+
+    /// Task is already registered with this client.
+    ///
+    /// Each task name must be unique within a client instance.
+    #[error("task '{task_name}' is already registered. Each task name must be unique.")]
+    TaskAlreadyRegistered {
+        /// The name of the task that was already registered.
+        task_name: String,
+    },
+
+    /// Header key uses a reserved prefix.
+    ///
+    /// User-provided headers cannot start with "durable::" as this prefix
+    /// is reserved for internal use.
+    #[error(
+        "header key '{key}' uses reserved prefix 'durable::'. User headers cannot start with 'durable::'."
+    )]
+    ReservedHeaderPrefix {
+        /// The header key that used the reserved prefix.
+        key: String,
+    },
+
+    /// Event name validation failed.
+    #[error("invalid event name: {reason}")]
+    InvalidEventName {
+        /// The reason the event name was invalid.
+        reason: String,
+    },
+}
+
+/// Result type alias for Client API operations.
+///
+/// Use this as the return type for [`Durable`](crate::Durable) method calls.
+pub type DurableResult<T> = Result<T, DurableError>;

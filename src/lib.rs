@@ -104,7 +104,7 @@ mod worker;
 // Re-export public API
 pub use client::{Durable, DurableBuilder};
 pub use context::TaskContext;
-pub use error::{ControlFlow, TaskError, TaskResult};
+pub use error::{ControlFlow, DurableError, DurableResult, TaskError, TaskResult};
 pub use task::Task;
 pub use types::{
     CancellationPolicy, ClaimedTask, RetryStrategy, SpawnOptions, SpawnResult, TaskHandle,

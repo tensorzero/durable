@@ -9,7 +9,7 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::context::TaskContext;
-use crate::error::{ControlFlow, TaskError, serialize_error};
+use crate::error::{ControlFlow, TaskError, serialize_task_error};
 use crate::task::TaskRegistry;
 use crate::types::{ClaimedTask, ClaimedTaskRow, WorkerOptions};
 
@@ -354,7 +354,9 @@ impl Worker {
                     &pool,
                     &queue_name,
                     task.run_id,
-                    &anyhow::anyhow!("Unknown task: {}", task.task_name),
+                    &TaskError::Validation {
+                        message: format!("Unknown task: {}", task.task_name),
+                    },
                 )
                 .await;
                 return;
@@ -435,7 +437,7 @@ impl Worker {
                     Err(e) if e.is_cancelled() => None, // Task was aborted
                     Err(e) => {
                         tracing::error!("Task {} panicked: {}", task_label, e);
-                        Some(Err(TaskError::Failed(anyhow::anyhow!("Task panicked: {e}"))))
+                        Some(Err(TaskError::TaskInternal(anyhow::anyhow!("Task panicked: {e}"))))
                     }
                 }
             }
@@ -512,7 +514,8 @@ impl Worker {
                 }
                 tracing::info!("Task {} was cancelled", task_label);
             }
-            Err(TaskError::Failed(ref e)) => {
+            Err(ref e) => {
+                // All other errors are failures (Timeout, Database, Serialization, ChildFailed, etc.)
                 #[cfg(feature = "telemetry")]
                 {
                     outcome = "failed";
@@ -555,8 +558,8 @@ impl Worker {
         }
     }
 
-    async fn fail_run(pool: &PgPool, queue_name: &str, run_id: Uuid, error: &anyhow::Error) {
-        let error_json = serialize_error(error);
+    async fn fail_run(pool: &PgPool, queue_name: &str, run_id: Uuid, error: &TaskError) {
+        let error_json = serialize_task_error(error);
         let query = "SELECT durable.fail_run($1, $2, $3, $4)";
         if let Err(e) = sqlx::query(query)
             .bind(queue_name)
