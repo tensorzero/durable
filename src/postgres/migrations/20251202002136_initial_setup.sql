@@ -655,22 +655,24 @@ begin
     raise exception 'Run "%" does not belong to task "%"', p_run_id, v_task_id;
   end if;
 
-  -- Check for existing checkpoint, else compute and store wake time
+  -- Compute the wake time we'll use if this is a new checkpoint
+  v_wake_at := v_now + (p_duration_ms || ' milliseconds')::interval;
+
+  -- Try to insert (first writer wins), ignore conflict to avoid race condition
+  execute format(
+    'insert into durable.%I (task_id, checkpoint_name, state, owner_run_id, updated_at)
+     values ($1, $2, $3, $4, $5)
+     on conflict (task_id, checkpoint_name) do nothing',
+    'c_' || p_queue_name
+  ) using v_task_id, p_checkpoint_name, to_jsonb(v_wake_at::text), p_run_id, v_now;
+
+  -- Select the actual value (whether we just inserted or it already existed)
   execute format(
     'select state from durable.%I where task_id = $1 and checkpoint_name = $2',
     'c_' || p_queue_name
   ) into v_existing_state using v_task_id, p_checkpoint_name;
 
-  if v_existing_state is not null then
-    v_wake_at := (v_existing_state #>> '{}')::timestamptz;
-  else
-    v_wake_at := v_now + (p_duration_ms || ' milliseconds')::interval;
-    execute format(
-      'insert into durable.%I (task_id, checkpoint_name, state, owner_run_id, updated_at)
-       values ($1, $2, $3, $4, $5)',
-      'c_' || p_queue_name
-    ) using v_task_id, p_checkpoint_name, to_jsonb(v_wake_at::text), p_run_id, v_now;
-  end if;
+  v_wake_at := (v_existing_state #>> '{}')::timestamptz;
 
   -- If wake time passed, return false (no suspend needed)
   if v_now >= v_wake_at then

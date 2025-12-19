@@ -34,10 +34,8 @@ async fn test_event_functions_use_advisory_locks(pool: PgPool) -> sqlx::Result<(
     .await?;
 
     assert!(
-        await_def.contains("pg_advisory_xact_lock")
-            && await_def.contains("hashtext(p_queue_name)")
-            && await_def.contains("hashtext(p_event_name)"),
-        "await_event should lock on (queue, event) to avoid lost wakeups"
+        await_def.contains("lock_event"),
+        "await_event should call lock_event to avoid lost wakeups"
     );
 
     let emit_def: String = sqlx::query_scalar(
@@ -47,10 +45,8 @@ async fn test_event_functions_use_advisory_locks(pool: PgPool) -> sqlx::Result<(
     .await?;
 
     assert!(
-        emit_def.contains("pg_advisory_xact_lock")
-            && emit_def.contains("hashtext(p_queue_name)")
-            && emit_def.contains("hashtext(p_event_name)"),
-        "emit_event should lock on (queue, event) to avoid lost wakeups"
+        emit_def.contains("lock_event"),
+        "emit_event should call lock_event to avoid lost wakeups"
     );
 
     Ok(())
