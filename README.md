@@ -310,6 +310,18 @@ This is useful when you need to guarantee that a task is only enqueued if relate
 
 - `DURABLE_DATABASE_URL` - Default PostgreSQL connection string (if not provided to builder)
 
+## Benchmarks
+
+Performance benchmarks run automatically on every push to `main` using [Criterion](https://github.com/bheisler/criterion.rs). Results are published to GitHub Pages:
+
+**[View Benchmark Results](https://tensorzero.github.io/durable/dev/bench/)**
+
+To run benchmarks locally:
+
+```bash
+cargo bench
+```
+
 ## License
 
 See LICENSE file.
