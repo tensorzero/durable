@@ -384,6 +384,13 @@ begin
     ) using v_now
   loop
     perform durable.cascade_cancel_children(p_queue_name, v_cancelled_task.task_id);
+
+    -- Delete wait registrations for the cancelled task itself.
+    -- These would otherwise be orphaned since emit_event won't wake cancelled tasks.
+    execute format(
+      'delete from durable.%I where task_id = $1',
+      'w_' || p_queue_name
+    ) using v_cancelled_task.task_id;
   end loop;
 
   -- Fail any run claims that have timed out.
@@ -614,6 +621,7 @@ $$;
 
 create function durable.sleep_for(
   p_queue_name text,
+  p_task_id uuid,
   p_run_id uuid,
   p_checkpoint_name text,
   p_duration_ms bigint
@@ -625,30 +633,20 @@ declare
   v_wake_at timestamptz;
   v_existing_state jsonb;
   v_now timestamptz := durable.current_time();
-  v_task_id uuid;
   v_task_id_locked uuid;
   v_run_task_id uuid;
 begin
   -- Lock task first to keep a consistent task -> run lock order.
-  -- Get task_id from run (needed for checkpoint table key)
-  execute format(
-    'select task_id from durable.%I where run_id = $1',
-    'r_' || p_queue_name
-  ) into v_task_id using p_run_id;
-
-  if v_task_id is null then
-    raise exception 'Run "%" is not currently running in queue "%"', p_run_id, p_queue_name;
-  end if;
-
   execute format(
     'select task_id from durable.%I where task_id = $1 for update',
     't_' || p_queue_name
-  ) into v_task_id_locked using v_task_id;
+  ) into v_task_id_locked using p_task_id;
 
   if v_task_id_locked is null then
-    raise exception 'Task "%" not found in queue "%"', v_task_id, p_queue_name;
+    raise exception 'Task "%" not found in queue "%"', p_task_id, p_queue_name;
   end if;
 
+  -- lock the run next
   execute format(
     'select task_id from durable.%I where run_id = $1 and state = ''running'' for update',
     'r_' || p_queue_name
@@ -658,8 +656,8 @@ begin
     raise exception 'Run "%" is not currently running in queue "%"', p_run_id, p_queue_name;
   end if;
 
-  if v_run_task_id <> v_task_id then
-    raise exception 'Run "%" does not belong to task "%"', p_run_id, v_task_id;
+  if v_run_task_id <> p_task_id then
+    raise exception 'Run "%" does not belong to task "%"', p_run_id, p_task_id;
   end if;
 
   -- Compute the wake time we'll use if this is a new checkpoint
@@ -671,13 +669,13 @@ begin
      values ($1, $2, $3, $4, $5)
      on conflict (task_id, checkpoint_name) do nothing',
     'c_' || p_queue_name
-  ) using v_task_id, p_checkpoint_name, to_jsonb(v_wake_at::text), p_run_id, v_now;
+  ) using p_task_id, p_checkpoint_name, to_jsonb(v_wake_at::text), p_run_id, v_now;
 
   -- Select the actual value (whether we just inserted or it already existed)
   execute format(
     'select state from durable.%I where task_id = $1 and checkpoint_name = $2',
     'c_' || p_queue_name
-  ) into v_existing_state using v_task_id, p_checkpoint_name;
+  ) into v_existing_state using p_task_id, p_checkpoint_name;
 
   v_wake_at := (v_existing_state #>> '{}')::timestamptz;
 
@@ -703,7 +701,7 @@ begin
         set state = ''sleeping''
       where task_id = $1',
     't_' || p_queue_name
-  ) using v_task_id;
+  ) using p_task_id;
 
   return true;
 end;
@@ -1376,10 +1374,15 @@ begin
            and (timeout_at is null or timeout_at > $2)
      ),
      -- Lock tasks first to keep a consistent task -> run lock order.
+     -- Only lock sleeping tasks. A task waiting on an event should be sleeping
+     -- (await_event sets both run and task to sleeping atomically).
+     -- This prevents waking cancelled tasks (e.g., when cascade_cancel_children
+     -- emits a child completion event for an already-cancelled parent).
      locked_tasks as (
         select t.task_id
           from durable.%4$I t
          where t.task_id in (select task_id from affected)
+           and t.state = ''sleeping''
            for update
      ),
      -- update the run table for all waiting runs so they are pending again

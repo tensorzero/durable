@@ -644,8 +644,35 @@ async fn test_join_timeout_when_parent_claim_expires(pool: PgPool) -> sqlx::Resu
 // Auto-cancellation Cascade Tests
 // ============================================================================
 
-/// Test that when a parent task is auto-cancelled via max_duration in claim_task,
-/// its children are also cascade-cancelled.
+/// Tests that when a parent task exceeds its `max_duration`, both the parent
+/// and its children are automatically cancelled via cascade cancellation.
+///
+/// # Test Setup
+///
+/// - Uses `single_conn_pool` (max_connections=1) so all operations share one
+///   Postgres session, making `fake_time` visible to both test and worker.
+/// - Parent task has `max_duration=5s` and spawns a child that sleeps for 60s.
+///
+/// # Sequence of Events
+///
+/// 1. **Spawn parent** with `max_duration=5s`, which will spawn a slow child.
+/// 2. **Worker claims parent** → parent spawns child, calls `join()`, suspends.
+///    - Parent: state="sleeping", `available_at=infinity` (waiting on join event)
+/// 3. **Worker claims child** → child calls `sleep_for(60s)`, suspends.
+///    - Child: state="sleeping", `available_at=start_time+60s`
+/// 4. **Test waits** until parent is "sleeping" with children spawned.
+/// 5. **Advance fake_time by 10s** → parent has now been running for 10s > max_duration(5s).
+/// 6. **Call `claim_task`** to trigger cancellation check:
+///    - `claim_task` sees parent exceeded `max_duration`, cancels it
+///    - `cascade_cancel_children` cancels the child
+/// 7. **Assert** both parent and child are in "cancelled" state.
+///
+/// # Why the tasks aren't claimable (important for understanding the test)
+///
+/// - Parent has `available_at=infinity` (join waits indefinitely for child completion)
+/// - Child has `available_at=start_time+60s` (only 10s have passed in fake_time)
+/// - Neither task can be claimed, but `claim_task` still runs cancellation checks
+///   on all non-terminal tasks regardless of `available_at`.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_cascade_cancel_when_parent_auto_cancelled_by_max_duration(
     pool_options: PgPoolOptions,

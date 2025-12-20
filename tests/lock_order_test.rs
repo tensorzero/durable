@@ -190,8 +190,9 @@ async fn test_sleep_for_locks_task_before_run(pool: PgPool) -> sqlx::Result<()> 
         let queue = queue.to_string();
         move |pool| async move {
             let mut tx = pool.begin().await?;
-            sqlx::query("SELECT durable.sleep_for($1, $2, $3, $4)")
+            sqlx::query("SELECT durable.sleep_for($1, $2, $3, $4, $5)")
                 .bind(&queue)
+                .bind(task_id)
                 .bind(run_id)
                 .bind("test_checkpoint")
                 .bind(1000i64)
