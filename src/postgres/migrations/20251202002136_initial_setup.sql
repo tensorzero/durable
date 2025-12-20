@@ -1152,6 +1152,7 @@ declare
   v_now timestamptz := durable.current_time();
   v_task_state text;
   v_wake_event text;
+  v_run_task_id uuid;
 begin
   if p_event_name is null or length(trim(p_event_name)) = 0 then
     raise exception 'event_name must be provided';
@@ -1185,25 +1186,42 @@ begin
     return;
   end if;
 
-  -- let's get the run state, any existing event payload and wake event name
+  -- Lock task first to keep a consistent task -> run lock order.
   execute format(
-    'select r.state, r.event_payload, r.wake_event, t.state
-       from durable.%I r
-       join durable.%I t on t.task_id = r.task_id
-      where r.run_id = $1
+    'select state
+       from durable.%I
+      where task_id = $1
       for update',
-    'r_' || p_queue_name,
     't_' || p_queue_name
   )
-  into v_run_state, v_existing_payload, v_wake_event, v_task_state
+  into v_task_state
+  using p_task_id;
+
+  if v_task_state is null then
+    raise exception 'Task "%" not found while awaiting event', p_task_id;
+  end if;
+
+  if v_task_state = 'cancelled' then
+    raise exception sqlstate 'AB001' using message = 'Task has been cancelled';
+  end if;
+
+  -- Lock run second.
+  execute format(
+    'select state, event_payload, wake_event, task_id
+       from durable.%I
+      where run_id = $1
+      for update',
+    'r_' || p_queue_name
+  )
+  into v_run_state, v_existing_payload, v_wake_event, v_run_task_id
   using p_run_id;
 
   if v_run_state is null then
     raise exception 'Run "%" not found while awaiting event', p_run_id;
   end if;
 
-  if v_task_state = 'cancelled' then
-    raise exception sqlstate 'AB001' using message = 'Task has been cancelled';
+  if v_run_task_id <> p_task_id then
+    raise exception 'Run "%" does not belong to task "%"', p_run_id, p_task_id;
   end if;
 
   execute format(
@@ -1350,6 +1368,13 @@ begin
          where event_name = $1
            and (timeout_at is null or timeout_at > $2)
      ),
+     -- Lock tasks first to keep a consistent task -> run lock order.
+     locked_tasks as (
+        select t.task_id
+          from durable.%4$I t
+         where t.task_id in (select task_id from affected)
+           for update
+     ),
      -- update the run table for all waiting runs so they are pending again
      updated_runs as (
         update durable.%2$I r
@@ -1361,6 +1386,7 @@ begin
                claim_expires_at = null
          where r.run_id in (select run_id from affected)
            and r.state = ''sleeping''
+           and r.task_id in (select task_id from locked_tasks)
          returning r.run_id, r.task_id
      ),
      -- update checkpoints for all affected tasks/steps so they contain the event payload
