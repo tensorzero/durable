@@ -1,0 +1,3 @@
+[alias]
+# Run all tests with nextest
+test-all = "nextest run"
