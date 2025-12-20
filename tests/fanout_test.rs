@@ -722,8 +722,47 @@ async fn test_cascade_cancel_when_parent_auto_cancelled_by_max_duration(
         }
     }
 
+    let (first_started_at, cancellation): (Option<chrono::DateTime<chrono::Utc>>, Option<serde_json::Value>) =
+        sqlx::query_as(
+            "SELECT first_started_at, cancellation FROM durable.t_fanout_auto_cancel WHERE task_id = $1",
+        )
+        .bind(spawn_result.task_id)
+        .fetch_one(&pool)
+        .await?;
+    assert!(
+        first_started_at.is_some(),
+        "first_started_at should be set before max_duration cancellation"
+    );
+    let max_duration = cancellation
+        .as_ref()
+        .and_then(|value| value.get("max_duration"))
+        .and_then(|value| value.as_i64());
+    assert_eq!(
+        max_duration,
+        Some(5),
+        "max_duration should be stored on the task"
+    );
+
     // Advance time past max_duration (5 seconds)
     advance_time(&pool, 10).await?;
+
+    let expected_now = start_time + chrono::Duration::seconds(10);
+    let now = common::helpers::current_time(&pool).await?;
+    let diff = (now - expected_now).num_seconds().abs();
+    assert!(
+        diff <= 1,
+        "fake time should advance by 10s (expected {:?}, got {:?})",
+        expected_now,
+        now
+    );
+    if let Some(first_started_at) = first_started_at {
+        let elapsed = (now - first_started_at).num_seconds();
+        assert!(
+            elapsed >= 5,
+            "elapsed time since first_started_at should exceed max_duration (elapsed {}s)",
+            elapsed
+        );
+    }
 
     // Trigger claim_task to process cancellation by calling it directly
     // (The worker won't see the time change, so we call claim_task manually)
