@@ -105,6 +105,38 @@ pub async fn get_run_state(
     Ok(result.map(|(s,)| s))
 }
 
+/// Information about a run.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct RunInfo {
+    pub run_id: Uuid,
+    pub state: String,
+    pub attempt: i32,
+}
+
+/// Get all runs for a task, ordered by attempt ascending.
+#[allow(dead_code)]
+pub async fn get_runs_for_task(
+    pool: &PgPool,
+    queue: &str,
+    task_id: Uuid,
+) -> sqlx::Result<Vec<RunInfo>> {
+    let query = AssertSqlSafe(format!(
+        "SELECT run_id, state, attempt FROM durable.r_{} WHERE task_id = $1 ORDER BY attempt ASC",
+        queue
+    ));
+    let rows: Vec<(Uuid, String, i32)> =
+        sqlx::query_as(query).bind(task_id).fetch_all(pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|(run_id, state, attempt)| RunInfo {
+            run_id,
+            state,
+            attempt,
+        })
+        .collect())
+}
+
 /// Get the state of a specific task.
 #[allow(dead_code)]
 pub async fn get_task_state(

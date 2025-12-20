@@ -6,8 +6,8 @@ use std::time::Duration;
 mod common;
 
 use common::helpers::{
-    advance_time, count_runs_for_task, get_checkpoint_count, get_task_state, set_fake_time,
-    wait_for_task_terminal,
+    advance_time, count_runs_for_task, get_checkpoint_count, get_runs_for_task, get_task_state,
+    set_fake_time, wait_for_task_terminal,
 };
 use common::tasks::{
     CpuBoundParams, CpuBoundTask, LongRunningHeartbeatParams, LongRunningHeartbeatTask,
@@ -195,6 +195,17 @@ async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> 
         .await
         .expect("Failed to spawn task");
 
+    // Stage 1: After spawn (before any worker)
+    let task_state = get_task_state(&pool, "crash_lease", spawn_result.task_id).await?;
+    assert_eq!(task_state, Some("pending".to_string()));
+    let runs = get_runs_for_task(&pool, "crash_lease", spawn_result.task_id).await?;
+    assert_eq!(runs.len(), 1, "Should have 1 run after spawn");
+    assert_eq!(
+        runs[0].state, "pending",
+        "Run should be pending after spawn"
+    );
+    assert_eq!(runs[0].attempt, 1, "First run should be attempt 1");
+
     // First worker claims the task
     let worker1 = client
         .start_worker(WorkerOptions {
@@ -204,17 +215,42 @@ async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> 
         })
         .await;
 
-    // Wait for task to start
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Stage 2: After worker1 claims task
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let task_state = get_task_state(&pool, "crash_lease", spawn_result.task_id).await?;
+    assert_eq!(task_state, Some("running".to_string()));
+    let runs = get_runs_for_task(&pool, "crash_lease", spawn_result.task_id).await?;
+    assert_eq!(runs.len(), 1, "Should still have 1 run after claim");
+    assert_eq!(
+        runs[0].state, "running",
+        "Run should be running after claim"
+    );
 
-    let state = get_task_state(&pool, "crash_lease", spawn_result.task_id).await?;
-    assert_eq!(state, Some("running".to_string()));
-
-    // Shutdown first worker (task lease will expire)
+    // Stage 3: After worker1 shutdown (graceful shutdown waits for task)
     worker1.shutdown().await;
+    let task_state = get_task_state(&pool, "crash_lease", spawn_result.task_id).await?;
+    assert_eq!(task_state, Some("running".to_string()));
+    let runs = get_runs_for_task(&pool, "crash_lease", spawn_result.task_id).await?;
+    assert_eq!(runs.len(), 1, "Should still have 1 run after shutdown");
+    assert_eq!(
+        runs[0].state, "running",
+        "Run should still be running after shutdown (DB state unchanged)"
+    );
 
-    // Advance time past the lease timeout
+    // Stage 4: After time advance (past lease expiration)
     advance_time(&pool, claim_timeout as i64 + 1).await?;
+    let task_state = get_task_state(&pool, "crash_lease", spawn_result.task_id).await?;
+    assert_eq!(task_state, Some("running".to_string()));
+    let runs = get_runs_for_task(&pool, "crash_lease", spawn_result.task_id).await?;
+    assert_eq!(
+        runs.len(),
+        1,
+        "Should still have 1 run (claim timeout only checked during claim_tasks)"
+    );
+    assert_eq!(
+        runs[0].state, "running",
+        "Run should still be running (claim timeout not yet processed)"
+    );
 
     // Second worker should be able to reclaim
     let worker2 = client
@@ -225,18 +261,25 @@ async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> 
         })
         .await;
 
-    // Give second worker time to reclaim
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // Verify there are now 2 runs for this task
-    let run_count = count_runs_for_task(&pool, "crash_lease", spawn_result.task_id).await?;
-    assert!(
-        run_count >= 2,
-        "Should have at least 2 runs after reclaim, got {}",
-        run_count
+    // Stage 5: After worker2 reclaims
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let task_state = get_task_state(&pool, "crash_lease", spawn_result.task_id).await?;
+    assert_eq!(task_state, Some("running".to_string()));
+    let runs = get_runs_for_task(&pool, "crash_lease", spawn_result.task_id).await?;
+    assert_eq!(runs.len(), 2, "Should have 2 runs after reclaim");
+    assert_eq!(
+        runs[0].state, "failed",
+        "First run should be failed due to claim timeout"
     );
+    assert_eq!(runs[0].attempt, 1, "First run should be attempt 1");
+    assert_eq!(
+        runs[1].state, "running",
+        "Second run should be running (claimed by worker2)"
+    );
+    assert_eq!(runs[1].attempt, 2, "Second run should be attempt 2");
 
-    worker2.shutdown().await;
+    // Drop worker2 instead of shutdown to avoid waiting for 60s task
+    drop(worker2);
 
     Ok(())
 }
