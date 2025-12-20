@@ -5,6 +5,9 @@ edition = "2024"
 license = "Apache-2.0"
 rust-version = "1.88.0"
 
+[lib]
+bench = false
+
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
