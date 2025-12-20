@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod common;
 
@@ -8,9 +8,11 @@ use common::tasks::{
     SpawnByNameParams, SpawnByNameTask, SpawnFailingChildTask, SpawnSlowChildParams,
     SpawnSlowChildTask,
 };
-use durable::{Durable, MIGRATOR, WorkerOptions};
+use durable::{CancellationPolicy, Durable, MIGRATOR, SpawnOptions, WorkerOptions};
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use std::time::Duration;
+use uuid::Uuid;
 
 /// Helper to create a Durable client from the test pool.
 async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
@@ -634,6 +636,124 @@ async fn test_join_timeout_when_parent_claim_expires(pool: PgPool) -> sqlx::Resu
         );
     }
     // If it completed or is still running, that's also valid - the timing is tricky
+
+    Ok(())
+}
+
+// ============================================================================
+// Auto-cancellation Cascade Tests
+// ============================================================================
+
+/// Test that when a parent task is auto-cancelled via max_duration in claim_task,
+/// its children are also cascade-cancelled.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_cascade_cancel_when_parent_auto_cancelled_by_max_duration(
+    pool_options: PgPoolOptions,
+    connect_options: PgConnectOptions,
+) -> sqlx::Result<()> {
+    use common::helpers::{advance_time, set_fake_time, single_conn_pool};
+
+    // Use single-connection pool for fake_time (session-scoped setting)
+    let pool = single_conn_pool(pool_options, connect_options).await?;
+
+    let client = Durable::builder()
+        .pool(pool.clone())
+        .queue_name("fanout_auto_cancel")
+        .build()
+        .await
+        .expect("Failed to create Durable client");
+    client.create_queue(None).await.unwrap();
+    client.register::<SpawnSlowChildTask>().await.unwrap();
+    client.register::<SlowChildTask>().await.unwrap();
+
+    let start_time = chrono::Utc::now();
+    set_fake_time(&pool, start_time).await?;
+
+    // Spawn parent with max_duration of 5 seconds
+    let spawn_result = client
+        .spawn_with_options::<SpawnSlowChildTask>(
+            SpawnSlowChildParams {
+                child_sleep_ms: 60000, // 60 seconds - child will be slow
+            },
+            SpawnOptions {
+                cancellation: Some(CancellationPolicy {
+                    max_delay: None,
+                    max_duration: Some(5), // Cancel after 5 seconds of running
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to spawn task");
+
+    // Start worker to let parent spawn child
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            concurrency: 2,
+            ..Default::default()
+        })
+        .await;
+
+    // Wait for parent to spawn child and go into sleeping state (waiting on join)
+    // We poll until the parent is sleeping and a child exists
+    let mut attempts = 0;
+    loop {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        attempts += 1;
+
+        let parent_state = get_task_state(&pool, "fanout_auto_cancel", spawn_result.task_id).await;
+        let query = "SELECT COUNT(*) FROM durable.t_fanout_auto_cancel WHERE parent_task_id = $1";
+        let (child_count,): (i64,) = sqlx::query_as(query)
+            .bind(spawn_result.task_id)
+            .fetch_one(&pool)
+            .await?;
+
+        if parent_state == "sleeping" && child_count > 0 {
+            break;
+        }
+
+        if attempts > 50 {
+            panic!(
+                "Timed out waiting for parent to be sleeping with children. State: {}, children: {}",
+                parent_state, child_count
+            );
+        }
+    }
+
+    // Advance time past max_duration (5 seconds)
+    advance_time(&pool, 10).await?;
+
+    // Trigger claim_task to process cancellation by calling it directly
+    // (The worker won't see the time change, so we call claim_task manually)
+    sqlx::query("SELECT * FROM durable.claim_task('fanout_auto_cancel', 'test-worker', 30, 1)")
+        .execute(&pool)
+        .await?;
+
+    // Verify parent is now cancelled
+    let parent_state = get_task_state(&pool, "fanout_auto_cancel", spawn_result.task_id).await;
+    assert_eq!(
+        parent_state, "cancelled",
+        "Parent should be cancelled after max_duration exceeded"
+    );
+
+    // Verify all children are also cancelled (cascade cancellation)
+    let query = "SELECT task_id, state FROM durable.t_fanout_auto_cancel WHERE parent_task_id = $1";
+    let child_states: Vec<(Uuid, String)> = sqlx::query_as(query)
+        .bind(spawn_result.task_id)
+        .fetch_all(&pool)
+        .await?;
+
+    for (child_id, state) in &child_states {
+        assert_eq!(
+            state, "cancelled",
+            "Child task {:?} should be cascade cancelled, got: {}",
+            child_id, state
+        );
+    }
+
+    worker.shutdown().await;
 
     Ok(())
 }

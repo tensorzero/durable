@@ -334,6 +334,7 @@ declare
   v_claim_until timestamptz;
   v_sql text;
   v_expired_run record;
+  v_cancelled_task record;
 begin
   if v_claim_timeout <= 0 then
     raise exception 'claim_timeout must be greater than zero';
@@ -344,40 +345,46 @@ begin
   -- Apply cancellation rules before claiming.
   -- These are max_delay (delay before starting) and
   -- max_duration (duration from created to finished)
-  execute format(
-    'with limits as (
-        select task_id,
-               (cancellation->>''max_delay'')::bigint as max_delay,
-               (cancellation->>''max_duration'')::bigint as max_duration,
-               enqueue_at,
-               first_started_at,
-               state
-          from durable.%I
-        where state in (''pending'', ''sleeping'', ''running'')
-     ),
-     to_cancel as (
-        select task_id
-          from limits
-         where
-           (
-             max_delay is not null
-             and first_started_at is null
-             and extract(epoch from ($1 - enqueue_at)) >= max_delay
-           )
-           or
-           (
-             max_duration is not null
-             and first_started_at is not null
-             and extract(epoch from ($1 - first_started_at)) >= max_duration
-           )
-     )
-     update durable.%I t
-        set state = ''cancelled'',
-            cancelled_at = coalesce(t.cancelled_at, $1)
-      where t.task_id in (select task_id from to_cancel)',
-    't_' || p_queue_name,
-    't_' || p_queue_name
-  ) using v_now;
+  -- Use a loop so we can cascade-cancel children for each cancelled task.
+  for v_cancelled_task in
+    execute format(
+      'with limits as (
+          select task_id,
+                 (cancellation->>''max_delay'')::bigint as max_delay,
+                 (cancellation->>''max_duration'')::bigint as max_duration,
+                 enqueue_at,
+                 first_started_at,
+                 state
+            from durable.%I
+          where state in (''pending'', ''sleeping'', ''running'')
+       ),
+       to_cancel as (
+          select task_id
+            from limits
+           where
+             (
+               max_delay is not null
+               and first_started_at is null
+               and extract(epoch from ($1 - enqueue_at)) >= max_delay
+             )
+             or
+             (
+               max_duration is not null
+               and first_started_at is not null
+               and extract(epoch from ($1 - first_started_at)) >= max_duration
+             )
+       )
+       update durable.%I t
+          set state = ''cancelled'',
+              cancelled_at = coalesce(t.cancelled_at, $1)
+        where t.task_id in (select task_id from to_cancel)
+        returning t.task_id',
+      't_' || p_queue_name,
+      't_' || p_queue_name
+    ) using v_now
+  loop
+    perform durable.cascade_cancel_children(p_queue_name, v_cancelled_task.task_id);
+  end loop;
 
   -- Fail any run claims that have timed out.
   -- Lock tasks first to keep a consistent task -> run lock order.
