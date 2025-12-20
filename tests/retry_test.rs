@@ -2,9 +2,12 @@
 
 mod common;
 
-use common::helpers::{advance_time, count_runs_for_task, set_fake_time, wait_for_task_terminal};
+use common::helpers::{
+    advance_time, count_runs_for_task, set_fake_time, single_conn_pool, wait_for_task_terminal,
+};
 use common::tasks::{FailingParams, FailingTask};
 use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use std::time::Duration;
 
@@ -71,7 +74,11 @@ async fn test_retry_strategy_none_no_retry(pool: PgPool) -> sqlx::Result<()> {
 
 /// Test that RetryStrategy::Fixed creates retry at T + base_seconds.
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn test_retry_strategy_fixed_delay(pool: PgPool) -> sqlx::Result<()> {
+async fn test_retry_strategy_fixed_delay(
+    pool_options: PgPoolOptions,
+    connect_options: PgConnectOptions,
+) -> sqlx::Result<()> {
+    let pool = single_conn_pool(pool_options, connect_options).await?;
     let client = create_client(pool.clone(), "retry_fixed").await;
     client.create_queue(None).await.unwrap();
     client.register::<FailingTask>().await.unwrap();
@@ -147,7 +154,11 @@ async fn test_retry_strategy_fixed_delay(pool: PgPool) -> sqlx::Result<()> {
 
 /// Test that RetryStrategy::Exponential increases delays correctly.
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn test_retry_strategy_exponential_backoff(pool: PgPool) -> sqlx::Result<()> {
+async fn test_retry_strategy_exponential_backoff(
+    pool_options: PgPoolOptions,
+    connect_options: PgConnectOptions,
+) -> sqlx::Result<()> {
+    let pool = single_conn_pool(pool_options, connect_options).await?;
     let client = create_client(pool.clone(), "retry_exp").await;
     client.create_queue(None).await.unwrap();
     client.register::<FailingTask>().await.unwrap();
@@ -230,7 +241,11 @@ async fn test_retry_strategy_exponential_backoff(pool: PgPool) -> sqlx::Result<(
 
 /// Test that max_attempts is honored and task fails permanently after N attempts.
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn test_max_attempts_honored(pool: PgPool) -> sqlx::Result<()> {
+async fn test_max_attempts_honored(
+    pool_options: PgPoolOptions,
+    connect_options: PgConnectOptions,
+) -> sqlx::Result<()> {
+    let pool = single_conn_pool(pool_options, connect_options).await?;
     let client = create_client(pool.clone(), "retry_max").await;
     client.create_queue(None).await.unwrap();
     client.register::<FailingTask>().await.unwrap();

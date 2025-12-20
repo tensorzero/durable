@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use std::time::Duration;
 
@@ -7,7 +8,7 @@ mod common;
 
 use common::helpers::{
     advance_time, count_runs_for_task, get_checkpoint_count, get_runs_for_task, get_task_state,
-    set_fake_time, wait_for_task_terminal,
+    set_fake_time, single_conn_pool, wait_for_task_terminal,
 };
 use common::tasks::{
     CpuBoundParams, CpuBoundTask, LongRunningHeartbeatParams, LongRunningHeartbeatTask,
@@ -176,7 +177,11 @@ async fn test_worker_drop_without_shutdown(pool: PgPool) -> sqlx::Result<()> {
 
 /// Test that a new worker can claim a task after the original worker's lease expires.
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> {
+async fn test_lease_expiration_allows_reclaim(
+    pool_options: PgPoolOptions,
+    connect_options: PgConnectOptions,
+) -> sqlx::Result<()> {
+    let pool = single_conn_pool(pool_options, connect_options).await?;
     let client = create_client(pool.clone(), "crash_lease").await;
     client.create_queue(None).await.unwrap();
     client.register::<LongRunningHeartbeatTask>().await.unwrap();
@@ -463,7 +468,11 @@ async fn test_step_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
 
 /// Test that a CPU-bound task that can't heartbeat gets reclaimed.
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn test_cpu_bound_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
+async fn test_cpu_bound_outlives_lease(
+    pool_options: PgPoolOptions,
+    connect_options: PgConnectOptions,
+) -> sqlx::Result<()> {
+    let pool = single_conn_pool(pool_options, connect_options).await?;
     let client = create_client(pool.clone(), "crash_cpu").await;
     client.create_queue(None).await.unwrap();
     client.register::<CpuBoundTask>().await.unwrap();

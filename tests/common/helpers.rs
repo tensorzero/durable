@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use std::time::Duration;
 use uuid::Uuid;
@@ -34,6 +35,18 @@ pub async fn current_time(pool: &PgPool) -> sqlx::Result<DateTime<Utc>> {
         .fetch_one(pool)
         .await?;
     Ok(time)
+}
+
+/// Create a single-connection pool for tests that rely on session-scoped settings.
+#[allow(dead_code)]
+pub async fn single_conn_pool(
+    pool_options: PgPoolOptions,
+    connect_options: PgConnectOptions,
+) -> sqlx::Result<PgPool> {
+    pool_options
+        .max_connections(1)
+        .connect_with(connect_options)
+        .await
 }
 
 // ============================================================================

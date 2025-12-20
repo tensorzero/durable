@@ -3,11 +3,13 @@
 mod common;
 
 use common::helpers::{
-    get_claim_expires_at, get_last_run_id, get_task_state, set_fake_time, wait_for_task_terminal,
+    advance_time, get_claim_expires_at, get_last_run_id, get_task_state, set_fake_time,
+    single_conn_pool, wait_for_task_terminal,
 };
 use common::tasks::{LongRunningHeartbeatParams, LongRunningHeartbeatTask};
 use durable::{Durable, MIGRATOR, WorkerOptions};
 use sqlx::PgPool;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::time::Duration;
 
 async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
@@ -25,7 +27,11 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 
 /// Test that claiming a task sets the correct expiry time.
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn test_claim_sets_correct_expiry(pool: PgPool) -> sqlx::Result<()> {
+async fn test_claim_sets_correct_expiry(
+    pool_options: PgPoolOptions,
+    connect_options: PgConnectOptions,
+) -> sqlx::Result<()> {
+    let pool = single_conn_pool(pool_options, connect_options).await?;
     let client = create_client(pool.clone(), "lease_claim").await;
     client.create_queue(None).await.unwrap();
     client.register::<LongRunningHeartbeatTask>().await.unwrap();
@@ -83,7 +89,11 @@ async fn test_claim_sets_correct_expiry(pool: PgPool) -> sqlx::Result<()> {
 
 /// Test that heartbeat extends the lease.
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn test_heartbeat_extends_lease(pool: PgPool) -> sqlx::Result<()> {
+async fn test_heartbeat_extends_lease(
+    pool_options: PgPoolOptions,
+    connect_options: PgConnectOptions,
+) -> sqlx::Result<()> {
+    let pool = single_conn_pool(pool_options, connect_options).await?;
     let client = create_client(pool.clone(), "lease_hb").await;
     client.create_queue(None).await.unwrap();
     client.register::<LongRunningHeartbeatTask>().await.unwrap();
@@ -122,6 +132,9 @@ async fn test_heartbeat_extends_lease(pool: PgPool) -> sqlx::Result<()> {
         .await?
         .expect("claim_expires_at should be set");
 
+    // Advance fake time so heartbeats extend the lease relative to a newer timestamp.
+    advance_time(&pool, 2).await?;
+
     // Wait for a couple heartbeats
     tokio::time::sleep(Duration::from_millis(1500)).await;
 
@@ -155,9 +168,13 @@ async fn test_heartbeat_extends_lease(pool: PgPool) -> sqlx::Result<()> {
 /// Test that checkpoint (ctx.step) extends the lease.
 /// We use ManyStepsTask to have enough steps to observe lease extension.
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn test_checkpoint_extends_lease(pool: PgPool) -> sqlx::Result<()> {
+async fn test_checkpoint_extends_lease(
+    pool_options: PgPoolOptions,
+    connect_options: PgConnectOptions,
+) -> sqlx::Result<()> {
     use common::tasks::{ManyStepsParams, ManyStepsTask};
 
+    let pool = single_conn_pool(pool_options, connect_options).await?;
     let client = create_client(pool.clone(), "lease_ckpt").await;
     client.create_queue(None).await.unwrap();
     client.register::<ManyStepsTask>().await.unwrap();

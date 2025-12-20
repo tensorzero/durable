@@ -306,6 +306,19 @@ This is useful when you need to guarantee that a task is only enqueued if relate
 | [`SpawnResult`] | Returned when spawning a task (task_id, run_id, attempt) |
 | [`ControlFlow`] | Signals for suspension and cancellation |
 
+## Testing Notes (Fake Time)
+
+`durable.current_time()` reads the `durable.fake_now` session variable in Postgres. That
+means fake time is scoped to a single connection.
+
+When tests call `set_fake_time()` or `advance_time()`, make sure the pool is constrained to
+one connection (or set `durable.fake_now` on every connection). With `#[sqlx::test]`, you
+can accept `(PgPoolOptions, PgConnectOptions)` and create a single-connection pool; see
+`tests/common/helpers.rs` and `single_conn_pool()` for the helper we use in tests.
+
+Fake time only affects database timestamps, not Tokio timers. If you need to observe lease
+extension behavior via heartbeats, advance fake time so `claim_expires_at` changes.
+
 ## Environment Variables
 
 - `DURABLE_DATABASE_URL` - Default PostgreSQL connection string (if not provided to builder)
