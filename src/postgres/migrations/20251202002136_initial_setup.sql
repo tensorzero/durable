@@ -1529,3 +1529,47 @@ begin
   return encode(b, 'hex')::uuid;
 end;
 $$;
+
+-- Get the current status of a task including relevant run information.
+-- Returns empty result set if task not found.
+create function durable.get_task_status(
+  p_queue_name text,
+  p_task_id uuid
+)
+returns table (
+  task_state text,
+  enqueue_at timestamptz,
+  first_started_at timestamptz,
+  attempts integer,
+  completed_payload jsonb,
+  cancelled_at timestamptz,
+  run_state text,
+  run_available_at timestamptz,
+  run_completed_at timestamptz,
+  run_failed_at timestamptz,
+  run_failure_reason jsonb
+)
+language plpgsql
+as $$
+begin
+  return query execute format(
+    'select
+       t.state,
+       t.enqueue_at,
+       t.first_started_at,
+       t.attempts,
+       t.completed_payload,
+       t.cancelled_at,
+       r.state,
+       r.available_at,
+       r.completed_at,
+       r.failed_at,
+       r.failure_reason
+     from durable.%I t
+     left join durable.%I r on r.run_id = t.last_attempt_run
+     where t.task_id = $1',
+    't_' || p_queue_name,
+    'r_' || p_queue_name
+  ) using p_task_id;
+end;
+$$;

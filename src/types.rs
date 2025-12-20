@@ -1,8 +1,10 @@
 use chrono::{DateTime, Utc};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::time::Duration;
 use uuid::Uuid;
 
 // Default value functions for RetryStrategy
@@ -330,4 +332,175 @@ pub(crate) struct ChildCompletePayload {
     pub result: Option<JsonValue>,
     /// Error information (only present if status is Failed)
     pub error: Option<JsonValue>,
+}
+
+/// Current status of a task.
+///
+/// Returned by [`Durable::poll_task`](crate::Durable::poll_task) and
+/// [`Durable::wait_for_task`](crate::Durable::wait_for_task).
+///
+/// The type parameter `T` represents the task's output type. Use `JsonValue`
+/// for dynamic access or a concrete type for compile-time safety.
+#[derive(Debug, Clone)]
+pub enum TaskStatus<T = JsonValue> {
+    /// Task is waiting to be picked up by a worker
+    Pending {
+        /// When the task was enqueued
+        enqueued_at: DateTime<Utc>,
+        /// Current attempt number
+        attempt: i32,
+    },
+
+    /// Task is currently being executed by a worker
+    Running {
+        /// When execution started
+        started_at: DateTime<Utc>,
+        /// Current attempt number
+        attempt: i32,
+    },
+
+    /// Task is suspended (sleeping or awaiting event)
+    Sleeping {
+        /// When the task will wake up (for sleeps) or None (for events with no timeout)
+        available_at: Option<DateTime<Utc>>,
+        /// Current attempt number
+        attempt: i32,
+    },
+
+    /// Task completed successfully
+    Completed {
+        /// Task output
+        output: T,
+        /// When task completed
+        completed_at: DateTime<Utc>,
+    },
+
+    /// Task failed after exhausting retries
+    Failed {
+        /// Error information
+        error: TaskFailureInfo,
+        /// When the task failed
+        failed_at: DateTime<Utc>,
+        /// Number of attempts made
+        attempts: i32,
+    },
+
+    /// Task was cancelled
+    Cancelled {
+        /// When the task was cancelled
+        cancelled_at: DateTime<Utc>,
+    },
+}
+
+impl<T> TaskStatus<T> {
+    /// Returns true if the task has reached a terminal state (completed, failed, or cancelled).
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            TaskStatus::Completed { .. } | TaskStatus::Failed { .. } | TaskStatus::Cancelled { .. }
+        )
+    }
+}
+
+impl TaskStatus<JsonValue> {
+    /// Convert to a typed TaskStatus by deserializing the output.
+    ///
+    /// Only the `Completed` variant's output is deserialized; other variants
+    /// are converted directly.
+    pub fn try_into_typed<T: DeserializeOwned>(self) -> Result<TaskStatus<T>, serde_json::Error> {
+        Ok(match self {
+            TaskStatus::Pending {
+                enqueued_at,
+                attempt,
+            } => TaskStatus::Pending {
+                enqueued_at,
+                attempt,
+            },
+            TaskStatus::Running {
+                started_at,
+                attempt,
+            } => TaskStatus::Running {
+                started_at,
+                attempt,
+            },
+            TaskStatus::Sleeping {
+                available_at,
+                attempt,
+            } => TaskStatus::Sleeping {
+                available_at,
+                attempt,
+            },
+            TaskStatus::Completed {
+                output,
+                completed_at,
+            } => TaskStatus::Completed {
+                output: serde_json::from_value(output)?,
+                completed_at,
+            },
+            TaskStatus::Failed {
+                error,
+                failed_at,
+                attempts,
+            } => TaskStatus::Failed {
+                error,
+                failed_at,
+                attempts,
+            },
+            TaskStatus::Cancelled { cancelled_at } => TaskStatus::Cancelled { cancelled_at },
+        })
+    }
+}
+
+/// Information about a task failure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskFailureInfo {
+    /// Error type name (e.g., "TaskInternal", "Timeout", "Database")
+    pub name: String,
+    /// Human-readable error message
+    pub message: String,
+    /// Optional step name where failure occurred
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_name: Option<String>,
+}
+
+/// Options for waiting on task completion.
+#[derive(Debug, Clone, Default)]
+pub struct WaitOptions {
+    /// Maximum time to wait for completion. If None, waits indefinitely.
+    pub timeout: Option<Duration>,
+    /// Interval between database polls. Defaults to 250ms.
+    pub poll_interval: Option<Duration>,
+}
+
+impl WaitOptions {
+    /// Create options with a timeout.
+    pub fn with_timeout(timeout: Duration) -> Self {
+        Self {
+            timeout: Some(timeout),
+            poll_interval: None,
+        }
+    }
+
+    /// Set the poll interval.
+    pub fn poll_interval(mut self, interval: Duration) -> Self {
+        self.poll_interval = Some(interval);
+        self
+    }
+}
+
+/// Internal: Row returned from task status query
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub(crate) struct TaskStatusRow {
+    pub task_state: String,
+    pub enqueue_at: DateTime<Utc>,
+    pub first_started_at: Option<DateTime<Utc>>,
+    pub attempts: i32,
+    pub completed_payload: Option<JsonValue>,
+    pub cancelled_at: Option<DateTime<Utc>>,
+    #[allow(dead_code)] // Required by SQL query but status derived from task_state
+    pub run_state: Option<String>,
+    pub run_available_at: Option<DateTime<Utc>>,
+    pub run_completed_at: Option<DateTime<Utc>>,
+    pub run_failed_at: Option<DateTime<Utc>>,
+    pub run_failure_reason: Option<JsonValue>,
 }

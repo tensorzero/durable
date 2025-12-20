@@ -1,5 +1,7 @@
 use serde_json::Value as JsonValue;
+use std::time::Duration;
 use thiserror::Error;
+use uuid::Uuid;
 
 /// Signals that interrupt task execution without indicating failure.
 ///
@@ -270,6 +272,24 @@ pub enum DurableError {
     InvalidEventName {
         /// The reason the event name was invalid.
         reason: String,
+    },
+
+    /// Task was not found in the specified queue.
+    #[error("task '{task_id}' not found in queue '{queue_name}'")]
+    TaskNotFound {
+        /// The task ID that was not found.
+        task_id: Uuid,
+        /// The queue name that was searched.
+        queue_name: String,
+    },
+
+    /// Timed out waiting for task completion.
+    #[error("timed out waiting for task '{task_id}' after {timeout:?}")]
+    WaitTimeout {
+        /// The task ID that was being waited on.
+        task_id: Uuid,
+        /// The timeout duration that elapsed.
+        timeout: Duration,
     },
 }
 

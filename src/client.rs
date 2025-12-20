@@ -1,16 +1,19 @@
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value as JsonValue;
 use sqlx::{Executor, PgPool, Postgres};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::error::{DurableError, DurableResult};
 use crate::task::{Task, TaskRegistry};
 use crate::types::{
-    CancellationPolicy, RetryStrategy, SpawnOptions, SpawnResult, SpawnResultRow, WorkerOptions,
+    CancellationPolicy, RetryStrategy, SpawnOptions, SpawnResult, SpawnResultRow, TaskFailureInfo,
+    TaskStatus, TaskStatusRow, WaitOptions, WorkerOptions,
 };
 
 /// Internal struct for serializing spawn options to the database.
@@ -614,6 +617,221 @@ where
     pub async fn close(self) {
         if self.owns_pool {
             self.pool.close().await;
+        }
+    }
+
+    /// Get the current status of a task by ID.
+    ///
+    /// This is a non-blocking call that returns the task's current state.
+    /// Works with any task_id, regardless of which client/process spawned it.
+    ///
+    /// # Arguments
+    /// * `task_id` - The task's unique identifier
+    /// * `queue_name` - Optional queue name (defaults to this client's queue)
+    ///
+    /// # Returns
+    /// * `Ok(TaskStatus<JsonValue>)` - The current task status
+    /// * `Err(DurableError::TaskNotFound)` - If the task doesn't exist
+    ///
+    /// # Example
+    /// ```ignore
+    /// let status = client.poll_task(task_id, None).await?;
+    /// match status {
+    ///     TaskStatus::Completed { output, .. } => println!("Done: {:?}", output),
+    ///     TaskStatus::Failed { error, .. } => println!("Failed: {}", error.message),
+    ///     TaskStatus::Running { .. } => println!("Still running..."),
+    ///     _ => {}
+    /// }
+    /// ```
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.client.poll_task",
+            skip(self),
+            fields(queue, task_id = %task_id)
+        )
+    )]
+    pub async fn poll_task(
+        &self,
+        task_id: Uuid,
+        queue_name: Option<&str>,
+    ) -> DurableResult<TaskStatus<JsonValue>> {
+        let queue = queue_name.unwrap_or(&self.queue_name);
+
+        #[cfg(feature = "telemetry")]
+        tracing::Span::current().record("queue", queue);
+
+        let row: Option<TaskStatusRow> = sqlx::query_as(
+            "SELECT task_state, enqueue_at, first_started_at, attempts,
+                    completed_payload, cancelled_at, run_state, run_available_at,
+                    run_completed_at, run_failed_at, run_failure_reason
+             FROM durable.get_task_status($1, $2)",
+        )
+        .bind(queue)
+        .bind(task_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let row = row.ok_or(DurableError::TaskNotFound {
+            task_id,
+            queue_name: queue.to_string(),
+        })?;
+
+        Ok(Self::row_to_task_status(row))
+    }
+
+    /// Poll task status and deserialize output to a specific type.
+    ///
+    /// Same as [`poll_task`](Self::poll_task) but deserializes the output to type `T`
+    /// when completed.
+    pub async fn poll_task_typed<T: DeserializeOwned>(
+        &self,
+        task_id: Uuid,
+        queue_name: Option<&str>,
+    ) -> DurableResult<TaskStatus<T>> {
+        let status = self.poll_task(task_id, queue_name).await?;
+        status.try_into_typed().map_err(DurableError::from)
+    }
+
+    /// Wait for a task to reach a terminal state (completed, failed, or cancelled).
+    ///
+    /// This polls the database at regular intervals until the task completes
+    /// or the timeout is reached.
+    ///
+    /// # Arguments
+    /// * `task_id` - The task's unique identifier
+    /// * `queue_name` - Optional queue name (defaults to this client's queue)
+    /// * `options` - Wait options (timeout, poll interval)
+    ///
+    /// # Returns
+    /// * `Ok(TaskStatus)` - The terminal status when task completes
+    /// * `Err(DurableError::WaitTimeout)` - If timeout reached before completion
+    /// * `Err(DurableError::TaskNotFound)` - If the task doesn't exist
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Wait up to 30 seconds for task to complete
+    /// let result = client.wait_for_task(
+    ///     task_id,
+    ///     None,
+    ///     WaitOptions::with_timeout(Duration::from_secs(30)),
+    /// ).await?;
+    ///
+    /// match result {
+    ///     TaskStatus::Completed { output, .. } => println!("Done: {:?}", output),
+    ///     TaskStatus::Failed { error, .. } => println!("Failed: {}", error.message),
+    ///     TaskStatus::Cancelled { .. } => println!("Cancelled"),
+    ///     _ => unreachable!(), // wait_for_task only returns terminal states
+    /// }
+    /// ```
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(
+            name = "durable.client.wait_for_task",
+            skip(self, options),
+            fields(queue, task_id = %task_id)
+        )
+    )]
+    pub async fn wait_for_task(
+        &self,
+        task_id: Uuid,
+        queue_name: Option<&str>,
+        options: WaitOptions,
+    ) -> DurableResult<TaskStatus<JsonValue>> {
+        let poll_interval = options.poll_interval.unwrap_or(Duration::from_millis(250));
+        let deadline = options
+            .timeout
+            .map(|timeout| (Instant::now() + timeout, timeout));
+
+        loop {
+            let status = self.poll_task(task_id, queue_name).await?;
+
+            if status.is_terminal() {
+                return Ok(status);
+            }
+
+            // Check timeout
+            if let Some((deadline, timeout)) = deadline
+                && Instant::now() >= deadline
+            {
+                return Err(DurableError::WaitTimeout { task_id, timeout });
+            }
+
+            tokio::time::sleep(poll_interval).await;
+        }
+    }
+
+    /// Wait for task and deserialize output to a specific type.
+    ///
+    /// Same as [`wait_for_task`](Self::wait_for_task) but deserializes the output to type `T`
+    /// when completed.
+    pub async fn wait_for_task_typed<T: DeserializeOwned>(
+        &self,
+        task_id: Uuid,
+        queue_name: Option<&str>,
+        options: WaitOptions,
+    ) -> DurableResult<TaskStatus<T>> {
+        let status = self.wait_for_task(task_id, queue_name, options).await?;
+        status.try_into_typed().map_err(DurableError::from)
+    }
+
+    /// Convert a database row to a TaskStatus enum.
+    fn row_to_task_status(row: TaskStatusRow) -> TaskStatus<JsonValue> {
+        match row.task_state.as_str() {
+            "pending" => TaskStatus::Pending {
+                enqueued_at: row.enqueue_at,
+                attempt: row.attempts.max(1),
+            },
+            "running" => TaskStatus::Running {
+                started_at: row.first_started_at.unwrap_or(row.enqueue_at),
+                attempt: row.attempts,
+            },
+            "sleeping" => TaskStatus::Sleeping {
+                available_at: row.run_available_at,
+                attempt: row.attempts,
+            },
+            "completed" => TaskStatus::Completed {
+                output: row.completed_payload.unwrap_or(JsonValue::Null),
+                completed_at: row.run_completed_at.unwrap_or(row.enqueue_at),
+            },
+            "failed" => {
+                let error = row
+                    .run_failure_reason
+                    .map(|r| TaskFailureInfo {
+                        name: r
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Unknown")
+                            .to_string(),
+                        message: r
+                            .get("message")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Unknown error")
+                            .to_string(),
+                        step_name: r
+                            .get("step_name")
+                            .and_then(|v| v.as_str())
+                            .map(String::from),
+                    })
+                    .unwrap_or(TaskFailureInfo {
+                        name: "Unknown".to_string(),
+                        message: "Unknown error".to_string(),
+                        step_name: None,
+                    });
+                TaskStatus::Failed {
+                    error,
+                    failed_at: row.run_failed_at.unwrap_or(row.enqueue_at),
+                    attempts: row.attempts,
+                }
+            }
+            "cancelled" => TaskStatus::Cancelled {
+                cancelled_at: row.cancelled_at.unwrap_or(row.enqueue_at),
+            },
+            // Fallback for unexpected states
+            _ => TaskStatus::Pending {
+                enqueued_at: row.enqueue_at,
+                attempt: row.attempts.max(1),
+            },
         }
     }
 }
