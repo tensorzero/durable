@@ -1048,6 +1048,19 @@ begin
 end;
 $$;
 
+-- Advisory lock to serialize await_event and emit_event operations on the same event.
+-- This prevents lost wakeups when a waiter is being set up while an emit is happening.
+-- Called at the top of await_event and emit_event.
+create function durable.lock_event (
+  p_queue_name text,
+  p_event_name text
+)
+  returns void
+  language sql
+as $$
+  select pg_advisory_xact_lock(hashtext(p_queue_name), hashtext(p_event_name));
+$$;
+
 -- awaits an event for a given task's run and step name.
 -- this will immediately return if it the event has already returned
 -- it will also time out if the event has taken too long
@@ -1081,6 +1094,9 @@ begin
   if p_event_name is null or length(trim(p_event_name)) = 0 then
     raise exception 'event_name must be provided';
   end if;
+
+  -- Serialize with concurrent emit_event calls on the same event
+  perform durable.lock_event(p_queue_name, p_event_name);
 
   if p_timeout is not null then
     if p_timeout < 0 then
@@ -1237,13 +1253,15 @@ begin
     raise exception 'event_name must be provided';
   end if;
 
-  -- insert the event into the events table
+  -- Serialize with concurrent await_event calls on the same event
+  perform durable.lock_event(p_queue_name, p_event_name);
+
+  -- Insert the event into the events table (first-writer-wins).
+  -- Subsequent emits for the same event are no-ops.
   execute format(
     'insert into durable.%I (event_name, payload, emitted_at)
      values ($1, $2, $3)
-     on conflict (event_name)
-     do update set payload = excluded.payload,
-                   emitted_at = excluded.emitted_at',
+     on conflict (event_name) do nothing',
     'e_' || p_queue_name
   ) using p_event_name, v_payload, v_now;
 
