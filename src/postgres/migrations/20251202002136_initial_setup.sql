@@ -999,8 +999,6 @@ as $$
 declare
   v_now timestamptz := durable.current_time();
   v_new_attempt integer;
-  v_existing_attempt integer;
-  v_existing_owner uuid;
   v_task_state text;
 begin
   if p_step_name is null or length(trim(p_step_name)) = 0 then
@@ -1042,29 +1040,22 @@ begin
   end if;
 
   execute format(
-    'select c.owner_run_id,
-            r.attempt
-       from durable.%I c
-       left join durable.%I r on r.run_id = c.owner_run_id
-      where c.task_id = $1
-        and c.checkpoint_name = $2',
+    'insert into durable.%I (task_id, checkpoint_name, state, owner_run_id, updated_at)
+     values ($1, $2, $3, $4, $5)
+     on conflict (task_id, checkpoint_name)
+     do update set state = excluded.state,
+                   owner_run_id = excluded.owner_run_id,
+                   updated_at = excluded.updated_at
+     where $6 >= coalesce(
+       (select r.attempt
+          from durable.%I r
+         where r.run_id = durable.%I.owner_run_id),
+       $6
+     )',
     'c_' || p_queue_name,
-    'r_' || p_queue_name
-  )
-  into v_existing_owner, v_existing_attempt
-  using p_task_id, p_step_name;
-
-  if v_existing_owner is null or v_existing_attempt is null or v_new_attempt >= v_existing_attempt then
-    execute format(
-      'insert into durable.%I (task_id, checkpoint_name, state, owner_run_id, updated_at)
-       values ($1, $2, $3, $4, $5)
-       on conflict (task_id, checkpoint_name)
-       do update set state = excluded.state,
-                     owner_run_id = excluded.owner_run_id,
-                     updated_at = excluded.updated_at',
-      'c_' || p_queue_name
-    ) using p_task_id, p_step_name, p_state, p_owner_run, v_now;
-  end if;
+    'r_' || p_queue_name,
+    'c_' || p_queue_name
+  ) using p_task_id, p_step_name, p_state, p_owner_run, v_now, v_new_attempt;
 end;
 $$;
 
