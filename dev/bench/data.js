@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1766269793777,
+  "lastUpdate": 1766342951734,
   "repoUrl": "https://github.com/tensorzero/durable",
   "entries": {
     "Criterion Benchmark": [
@@ -149,6 +149,156 @@ window.BENCHMARK_DATA = {
             "name": "e2e_completion/single_task_roundtrip",
             "value": 14729507,
             "range": "± 394287",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "virajmehta@users.noreply.github.com",
+            "name": "Viraj Mehta",
+            "username": "virajmehta"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "551f3cb4e672ca854cad1b35d912d08e7bf55607",
+          "message": "fix: prevent lost wakeups in event await/emit race condition (#37)\n\nAdd advisory locks to serialize concurrent await_event and emit_event\n   operations on the same event. This prevents a race condition where:\n\n   1. Task A checks if event exists (not yet)\n   2. Task B emits the event and wakes waiters (none yet)\n   3. Task A registers as a waiter (missed the wake)\n\n   The lock_event() function uses pg_advisory_xact_lock with hashed\n   queue_name and event_name to ensure atomicity.\n\n   Also changes emit_event to first-writer-wins semantics (ON CONFLICT\n   DO NOTHING) to maintain consistency - subsequent emits for the same\n   event are no-ops.\n\n   Tests:\n   - test_event_functions_use_advisory_locks: Verifies both functions call lock_event\n   - test_event_race_stress: Stress test with 128 concurrent tasks x 4 rounds\n   - test_event_first_writer_wins: Renamed from test_event_last_write_wins",
+          "timestamp": "2025-12-21T17:20:48Z",
+          "tree_id": "cfe32e48838e112288e590520821d8a5ecf71de5",
+          "url": "https://github.com/tensorzero/durable/commit/551f3cb4e672ca854cad1b35d912d08e7bf55607"
+        },
+        "date": 1766342951349,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "step_cache_miss/steps/10",
+            "value": 45839945,
+            "range": "± 1322907",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/50",
+            "value": 90054953,
+            "range": "± 1479827",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/100",
+            "value": 143503209,
+            "range": "± 2079548",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/10",
+            "value": 12008902,
+            "range": "± 282984",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/50",
+            "value": 11750280,
+            "range": "± 419605",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/100",
+            "value": 11742166,
+            "range": "± 394732",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1",
+            "value": 28931091,
+            "range": "± 1860200",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/100",
+            "value": 24247906,
+            "range": "± 188847",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1000",
+            "value": 73119604,
+            "range": "± 4387663",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/2",
+            "value": 618542688,
+            "range": "± 10484028",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/4",
+            "value": 401977378,
+            "range": "± 8610861",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/8",
+            "value": 354156492,
+            "range": "± 6320041",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/16",
+            "value": 357871998,
+            "range": "± 6839477",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/baseline",
+            "value": 157521455,
+            "range": "± 10369272",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/contention",
+            "value": 103957700,
+            "range": "± 5263760",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "spawn_latency/single_spawn",
+            "value": 858154,
+            "range": "± 442857",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/1",
+            "value": 556289706,
+            "range": "± 11219761",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/2",
+            "value": 326909829,
+            "range": "± 5966224",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/4",
+            "value": 244252825,
+            "range": "± 3639529",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/8",
+            "value": 188313896,
+            "range": "± 3668630",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "e2e_completion/single_task_roundtrip",
+            "value": 14843282,
+            "range": "± 437462",
             "unit": "ns/iter"
           }
         ]
