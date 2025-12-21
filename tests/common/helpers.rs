@@ -1,7 +1,30 @@
 use chrono::{DateTime, Utc};
+use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, PgPool};
 use std::time::Duration;
 use uuid::Uuid;
+
+// ============================================================================
+// Pool helpers
+// ============================================================================
+
+/// Create a single-connection pool for tests that use fake_time.
+///
+/// PostgreSQL session variables like `durable.fake_now` are scoped to a single
+/// connection. When using a multi-connection pool, different connections may
+/// have different values for the session variable, causing flaky tests.
+///
+/// This function creates a pool with max_connections=1, ensuring all queries
+/// run on the same connection and see the same fake_now value.
+#[allow(dead_code)]
+pub async fn single_conn_pool(pool: &PgPool) -> PgPool {
+    let connect_options = (*pool.connect_options()).clone();
+    PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(connect_options)
+        .await
+        .expect("Failed to create single-connection pool")
+}
 
 /// Set fake time for deterministic testing.
 /// Uses the durable.fake_now session variable.
@@ -244,4 +267,62 @@ pub async fn get_failed_payload(
         .fetch_optional(pool)
         .await?;
     Ok(result.and_then(|(p,)| p))
+}
+
+// ============================================================================
+// Run inspection helpers (detailed)
+// ============================================================================
+
+/// Information about a run.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct RunInfo {
+    pub run_id: Uuid,
+    pub task_id: Uuid,
+    pub attempt: i32,
+    pub state: String,
+    pub available_at: DateTime<Utc>,
+    pub claim_expires_at: Option<DateTime<Utc>>,
+    pub failure_reason: Option<serde_json::Value>,
+}
+
+/// Get all runs for a task, ordered by attempt number.
+#[allow(dead_code)]
+pub async fn get_runs_for_task(
+    pool: &PgPool,
+    queue: &str,
+    task_id: Uuid,
+) -> sqlx::Result<Vec<RunInfo>> {
+    let query = AssertSqlSafe(format!(
+        "SELECT run_id, task_id, attempt, state, available_at, claim_expires_at, failure_reason
+         FROM durable.r_{} WHERE task_id = $1 ORDER BY attempt",
+        queue
+    ));
+    type RunInfoRow = (
+        Uuid,
+        Uuid,
+        i32,
+        String,
+        DateTime<Utc>,
+        Option<DateTime<Utc>>,
+        Option<serde_json::Value>,
+    );
+    let rows: Vec<RunInfoRow> = sqlx::query_as(query).bind(task_id).fetch_all(pool).await?;
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(run_id, task_id, attempt, state, available_at, claim_expires_at, failure_reason)| {
+                RunInfo {
+                    run_id,
+                    task_id,
+                    attempt,
+                    state,
+                    available_at,
+                    claim_expires_at,
+                    failure_reason,
+                }
+            },
+        )
+        .collect())
 }

@@ -350,6 +350,99 @@ async fn test_cascade_cancel_when_parent_cancelled(pool: PgPool) -> sqlx::Result
     Ok(())
 }
 
+/// Test that cascade cancellation happens when a parent task is auto-cancelled
+/// due to max_duration expiring while waiting for a child.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_cascade_cancel_when_parent_auto_cancelled_by_max_duration(
+    pool: PgPool,
+) -> sqlx::Result<()> {
+    use common::helpers::{advance_time, set_fake_time, single_conn_pool, wait_for_task_terminal};
+    use durable::{CancellationPolicy, SpawnOptions};
+
+    // Use single-conn pool for fake_time
+    let test_pool = single_conn_pool(&pool).await;
+
+    let client = create_client(test_pool.clone(), "fanout_auto_cancel").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<SpawnSlowChildTask>().await.unwrap();
+    client.register::<SlowChildTask>().await.unwrap();
+
+    let start_time = chrono::Utc::now();
+    set_fake_time(&test_pool, start_time).await?;
+
+    // Spawn parent with max_duration of 2 seconds
+    // The child will sleep for 10 seconds, so the parent will auto-cancel
+    let spawn_result = client
+        .spawn_with_options::<SpawnSlowChildTask>(
+            SpawnSlowChildParams {
+                child_sleep_ms: 10000, // 10 seconds
+            },
+            SpawnOptions {
+                cancellation: Some(CancellationPolicy {
+                    max_delay: None,
+                    max_duration: Some(2), // 2 seconds max duration
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to spawn task");
+
+    // Start worker
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            concurrency: 2,
+            ..Default::default()
+        })
+        .await;
+
+    // Wait for parent to spawn child
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Verify child was spawned
+    let query = "SELECT task_id FROM durable.t_fanout_auto_cancel WHERE parent_task_id = $1";
+    let child_ids: Vec<(uuid::Uuid,)> = sqlx::query_as(query)
+        .bind(spawn_result.task_id)
+        .fetch_all(&test_pool)
+        .await?;
+
+    assert!(!child_ids.is_empty(), "Child should have been spawned");
+
+    // Advance time past max_duration
+    advance_time(&test_pool, 3).await?;
+
+    // Give time for auto-cancellation to trigger
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Wait for parent to reach terminal state
+    let terminal = wait_for_task_terminal(
+        &test_pool,
+        "fanout_auto_cancel",
+        spawn_result.task_id,
+        Duration::from_secs(5),
+    )
+    .await?;
+    worker.shutdown().await;
+
+    // Parent should be cancelled due to max_duration
+    assert_eq!(
+        terminal,
+        Some("cancelled".to_string()),
+        "Parent should be auto-cancelled due to max_duration"
+    );
+
+    // Child should also be cancelled (cascade)
+    let child_state = get_task_state(&pool, "fanout_auto_cancel", child_ids[0].0).await;
+    assert_eq!(
+        child_state, "cancelled",
+        "Child should be cascade cancelled when parent is auto-cancelled"
+    );
+
+    Ok(())
+}
+
 // ============================================================================
 // spawn_by_name Tests
 // ============================================================================
