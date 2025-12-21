@@ -36,12 +36,12 @@ struct CancellationPolicyDb {
 
 impl CancellationPolicyDb {
     fn from_policy(policy: &CancellationPolicy) -> Option<Self> {
-        if policy.max_delay.is_none() && policy.max_duration.is_none() {
+        if policy.max_pending_time.is_none() && policy.max_running_time.is_none() {
             None
         } else {
             Some(Self {
-                max_delay: policy.max_delay,
-                max_duration: policy.max_duration,
+                max_delay: policy.max_pending_time.map(|d| d.as_secs()),
+                max_duration: policy.max_running_time.map(|d| d.as_secs()),
             })
         }
     }

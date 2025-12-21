@@ -1,19 +1,21 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use serde_with::{DurationSeconds, serde_as};
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::time::Duration;
 use uuid::Uuid;
 
 // Default value functions for RetryStrategy
-fn default_base_seconds() -> u64 {
-    5
+fn default_base_delay() -> Duration {
+    Duration::from_secs(5)
 }
 fn default_factor() -> f64 {
     2.0
 }
-fn default_max_seconds() -> u64 {
-    300
+fn default_max_backoff() -> Duration {
+    Duration::from_secs(300)
 }
 
 /// Retry strategy for failed tasks.
@@ -24,17 +26,19 @@ fn default_max_seconds() -> u64 {
 /// # Example
 ///
 /// ```
+/// use std::time::Duration;
 /// use durable::{RetryStrategy, SpawnOptions};
 ///
 /// let options = SpawnOptions {
 ///     retry_strategy: Some(RetryStrategy::Exponential {
-///         base_seconds: 1,
+///         base_delay: Duration::from_secs(1),
 ///         factor: 2.0,
-///         max_seconds: 60,
+///         max_backoff: Duration::from_secs(60),
 ///     }),
 ///     ..Default::default()
 /// };
 /// ```
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RetryStrategy {
@@ -43,29 +47,32 @@ pub enum RetryStrategy {
 
     /// Fixed delay between retries
     Fixed {
-        /// Delay in seconds between retry attempts (default: 5)
-        #[serde(default = "default_base_seconds")]
-        base_seconds: u64,
+        /// Delay between retry attempts (default: 5 seconds)
+        #[serde(default = "default_base_delay", rename = "base_seconds")]
+        #[serde_as(as = "DurationSeconds<u64>")]
+        base_delay: Duration,
     },
 
-    /// Exponential backoff: delay = base_seconds * (factor ^ (attempt - 1))
+    /// Exponential backoff: delay = base_delay * (factor ^ (attempt - 1))
     Exponential {
-        /// Initial delay in seconds (default: 5)
-        #[serde(default = "default_base_seconds")]
-        base_seconds: u64,
+        /// Initial delay (default: 5 seconds)
+        #[serde(default = "default_base_delay", rename = "base_seconds")]
+        #[serde_as(as = "DurationSeconds<u64>")]
+        base_delay: Duration,
         /// Multiplier for each subsequent attempt (default: 2.0)
         #[serde(default = "default_factor")]
         factor: f64,
-        /// Maximum delay cap in seconds (default: 300)
-        #[serde(default = "default_max_seconds")]
-        max_seconds: u64,
+        /// Maximum delay cap (default: 300 seconds)
+        #[serde(default = "default_max_backoff", rename = "max_seconds")]
+        #[serde_as(as = "DurationSeconds<u64>")]
+        max_backoff: Duration,
     },
 }
 
 impl Default for RetryStrategy {
     fn default() -> Self {
         Self::Fixed {
-            base_seconds: default_base_seconds(),
+            base_delay: default_base_delay(),
         }
     }
 }
@@ -74,17 +81,20 @@ impl Default for RetryStrategy {
 ///
 /// Allows tasks to be automatically cancelled based on how long they've been
 /// waiting or running. Useful for preventing stale tasks from consuming resources.
+#[serde_as]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CancellationPolicy {
-    /// Cancel if task has been pending for more than this many seconds.
+    /// Cancel if task has been pending for more than this duration.
     /// Checked when the task would be claimed.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_delay: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "max_delay")]
+    #[serde_as(as = "Option<DurationSeconds<u64>>")]
+    pub max_pending_time: Option<Duration>,
 
-    /// Cancel if task has been running for more than this many seconds total
+    /// Cancel if task has been running for more than this duration total
     /// (across all attempts). Checked on retry.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_duration: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "max_duration")]
+    #[serde_as(as = "Option<DurationSeconds<u64>>")]
+    pub max_running_time: Option<Duration>,
 }
 
 /// Options for spawning a task.
@@ -94,14 +104,15 @@ pub struct CancellationPolicy {
 /// # Example
 ///
 /// ```
+/// use std::time::Duration;
 /// use durable::{SpawnOptions, RetryStrategy};
 ///
 /// let options = SpawnOptions {
 ///     max_attempts: Some(3),
 ///     retry_strategy: Some(RetryStrategy::Exponential {
-///         base_seconds: 5,
+///         base_delay: Duration::from_secs(5),
 ///         factor: 2.0,
-///         max_seconds: 300,
+///         max_backoff: Duration::from_secs(300),
 ///     }),
 ///     ..Default::default()
 /// };
@@ -130,12 +141,13 @@ pub struct SpawnOptions {
 /// # Example
 ///
 /// ```
+/// use std::time::Duration;
 /// use durable::WorkerOptions;
 ///
 /// let options = WorkerOptions {
 ///     concurrency: 4,
-///     claim_timeout: 120,
-///     poll_interval: 0.5,
+///     claim_timeout: Duration::from_secs(120),
+///     poll_interval: Duration::from_millis(500),
 ///     ..Default::default()
 /// };
 /// ```
@@ -144,9 +156,9 @@ pub struct WorkerOptions {
     /// Unique worker identifier (default: hostname:pid)
     pub worker_id: Option<String>,
 
-    /// Task lease duration in seconds (default: 120).
+    /// Task lease duration (default: 120 seconds).
     /// Tasks must complete or checkpoint within this time.
-    pub claim_timeout: u64,
+    pub claim_timeout: Duration,
 
     /// Maximum tasks to claim per poll (default: same as concurrency)
     pub batch_size: Option<usize>,
@@ -154,8 +166,8 @@ pub struct WorkerOptions {
     /// Maximum parallel task executions (default: 1)
     pub concurrency: usize,
 
-    /// Seconds between polls when queue is empty (default: 0.25)
-    pub poll_interval: f64,
+    /// Interval between polls when queue is empty (default: 250ms)
+    pub poll_interval: Duration,
 
     /// Terminate process if task exceeds 2x claim_timeout (default: false).
     /// When false, the task is aborted but other tasks continue running.
@@ -167,10 +179,10 @@ impl Default for WorkerOptions {
     fn default() -> Self {
         Self {
             worker_id: None,
-            claim_timeout: 120,
+            claim_timeout: Duration::from_secs(120),
             batch_size: None,
             concurrency: 1,
-            poll_interval: 0.25,
+            poll_interval: Duration::from_millis(250),
             fatal_on_lease_timeout: false,
         }
     }

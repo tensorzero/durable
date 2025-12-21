@@ -57,8 +57,12 @@ fn bench_concurrent_claims(c: &mut Criterion) {
                                     // Sync all workers to start together
                                     barrier.wait().await;
 
-                                    let worker =
-                                        client.start_worker(bench_worker_options(1, 60)).await;
+                                    let worker = client
+                                        .start_worker(bench_worker_options(
+                                            1,
+                                            Duration::from_secs(60),
+                                        ))
+                                        .await;
 
                                     // Wait a bit then shutdown
                                     tokio::time::sleep(Duration::from_secs(15)).await;
@@ -142,8 +146,12 @@ fn bench_claim_latency_distribution(c: &mut Criterion) {
                                 let handle = tokio::spawn(async move {
                                     barrier.wait().await;
 
-                                    let worker =
-                                        client.start_worker(bench_worker_options(4, 60)).await;
+                                    let worker = client
+                                        .start_worker(bench_worker_options(
+                                            4,
+                                            Duration::from_secs(60),
+                                        ))
+                                        .await;
 
                                     tokio::time::sleep(Duration::from_secs(20)).await;
                                     worker.shutdown().await;

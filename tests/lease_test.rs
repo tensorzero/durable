@@ -33,7 +33,7 @@ async fn test_claim_sets_correct_expiry(pool: PgPool) -> sqlx::Result<()> {
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
 
-    let claim_timeout = 30; // 30 seconds
+    let claim_timeout = Duration::from_secs(30); // 30 seconds
 
     // Spawn a task that will take a while (uses heartbeats)
     let spawn_result = client
@@ -46,7 +46,7 @@ async fn test_claim_sets_correct_expiry(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
+            poll_interval: Duration::from_millis(50),
             claim_timeout,
             ..Default::default()
         })
@@ -66,13 +66,13 @@ async fn test_claim_sets_correct_expiry(pool: PgPool) -> sqlx::Result<()> {
         .expect("claim_expires_at should be set");
 
     // Should be approximately start_time + claim_timeout seconds
-    let expected_expiry = start_time + chrono::Duration::seconds(claim_timeout as i64);
+    let expected_expiry = start_time + chrono::Duration::seconds(claim_timeout.as_secs() as i64);
     let diff = (claim_expires - expected_expiry).num_seconds().abs();
 
     assert!(
         diff <= 2,
         "claim_expires_at should be ~{} seconds from start, got {} seconds diff",
-        claim_timeout,
+        claim_timeout.as_secs(),
         diff
     );
 
@@ -91,7 +91,7 @@ async fn test_heartbeat_extends_lease(pool: PgPool) -> sqlx::Result<()> {
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
 
-    let claim_timeout = 10; // 10 seconds
+    let claim_timeout = Duration::from_secs(10); // 10 seconds
 
     // Spawn task that heartbeats frequently
     let spawn_result = client
@@ -104,7 +104,7 @@ async fn test_heartbeat_extends_lease(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
+            poll_interval: Duration::from_millis(50),
             claim_timeout,
             ..Default::default()
         })
@@ -165,7 +165,7 @@ async fn test_checkpoint_extends_lease(pool: PgPool) -> sqlx::Result<()> {
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
 
-    let claim_timeout = 30;
+    let claim_timeout = Duration::from_secs(30);
     let num_steps = 20; // Enough steps to observe lease extension
 
     // Spawn task that creates many checkpoints
@@ -176,7 +176,7 @@ async fn test_checkpoint_extends_lease(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
+            poll_interval: Duration::from_millis(50),
             claim_timeout,
             ..Default::default()
         })
@@ -243,8 +243,8 @@ async fn test_heartbeat_detects_cancellation(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;

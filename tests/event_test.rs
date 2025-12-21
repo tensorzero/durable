@@ -40,8 +40,8 @@ async fn test_emit_event_wakes_waiter(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -113,8 +113,8 @@ async fn test_event_already_emitted_returns_immediately(pool: PgPool) -> sqlx::R
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -170,8 +170,8 @@ async fn test_event_timeout_triggers(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -226,8 +226,8 @@ async fn test_multiple_waiters_same_event(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 3,
             ..Default::default()
         })
@@ -279,7 +279,9 @@ async fn test_event_payload_preserved_on_retry(pool: PgPool) -> sqlx::Result<()>
                 event_name: "retry_event".to_string(),
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(2),
                 ..Default::default()
             },
@@ -289,8 +291,8 @@ async fn test_event_payload_preserved_on_retry(pool: PgPool) -> sqlx::Result<()>
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -359,8 +361,8 @@ async fn test_event_last_write_wins(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -410,8 +412,8 @@ async fn test_multiple_distinct_events(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -480,8 +482,8 @@ async fn test_event_write_does_not_propagate_after_wake(pool: PgPool) -> sqlx::R
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -550,8 +552,8 @@ async fn test_emit_from_different_task(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 2,
             ..Default::default()
         })
@@ -725,8 +727,8 @@ async fn test_event_timeout_error_payload(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;

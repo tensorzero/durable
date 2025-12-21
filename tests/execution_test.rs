@@ -83,8 +83,8 @@ async fn test_simple_task_executes_and_completes(pool: PgPool) -> sqlx::Result<(
     // Start worker with short poll interval
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -129,8 +129,8 @@ async fn test_task_state_transitions(pool: PgPool) -> sqlx::Result<()> {
     // Start worker
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -159,8 +159,8 @@ async fn test_empty_params_task_executes(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -196,8 +196,8 @@ async fn test_multi_step_task_completes_all_steps(pool: PgPool) -> sqlx::Result<
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -246,8 +246,8 @@ async fn test_multiple_tasks_execute_concurrently(pool: PgPool) -> sqlx::Result<
     // Start worker with concurrency > 1
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 5,
             ..Default::default()
         })
@@ -285,8 +285,8 @@ async fn test_worker_concurrency_limit_respected(pool: PgPool) -> sqlx::Result<(
     // Start worker with low concurrency
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 2, // Only 2 at a time
             ..Default::default()
         })
@@ -323,8 +323,8 @@ async fn test_worker_graceful_shutdown_waits(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -394,8 +394,8 @@ async fn test_task_result_stored_correctly(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -430,8 +430,8 @@ async fn test_research_task_readme_example(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -478,8 +478,8 @@ async fn test_convenience_methods_execute(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -529,8 +529,8 @@ async fn test_multiple_convenience_calls_produce_different_values(
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -572,8 +572,8 @@ async fn test_reserved_prefix_rejected(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -611,8 +611,8 @@ async fn test_reserved_prefix_error_payload(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -672,8 +672,8 @@ async fn test_long_running_task_with_heartbeat_completes(pool: PgPool) -> sqlx::
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 1, // 1 second claim timeout - task runs for 3x this duration
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(1), // 1 second claim timeout - task runs for 3x this duration
             ..Default::default()
         })
         .await;
@@ -791,8 +791,8 @@ async fn test_task_uses_application_state(pool: PgPool) -> sqlx::Result<()> {
     // Start worker
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;

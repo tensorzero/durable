@@ -39,8 +39,10 @@ fn bench_step_cache_miss(c: &mut Criterion) {
                                 .unwrap();
 
                             let start = std::time::Instant::now();
-                            let worker =
-                                ctx.client.start_worker(bench_worker_options(1, 120)).await;
+                            let worker = ctx
+                                .client
+                                .start_worker(bench_worker_options(1, Duration::from_secs(120)))
+                                .await;
 
                             wait_for_tasks_complete(&ctx.pool, &ctx.queue_name, 1, 60).await;
                             total_time += start.elapsed();
@@ -91,7 +93,7 @@ fn bench_step_cache_hit(c: &mut Criterion) {
 
                             let worker = ctx
                                 .client
-                                .start_worker(bench_worker_options(1, 120))
+                                .start_worker(bench_worker_options(1, Duration::from_secs(120)))
                                 .await;
 
                             wait_for_tasks_complete(&ctx.pool, &ctx.queue_name, 1, 60).await;
@@ -123,7 +125,7 @@ fn bench_step_cache_hit(c: &mut Criterion) {
                             let start = std::time::Instant::now();
                             let worker = ctx
                                 .client
-                                .start_worker(bench_worker_options(1, 120))
+                                .start_worker(bench_worker_options(1, Duration::from_secs(120)))
                                 .await;
 
                             wait_for_tasks_complete(&ctx.pool, &ctx.queue_name, 1, 60).await;
@@ -177,8 +179,10 @@ fn bench_large_payload_checkpoint(c: &mut Criterion) {
                                 .unwrap();
 
                             let start = std::time::Instant::now();
-                            let worker =
-                                ctx.client.start_worker(bench_worker_options(1, 120)).await;
+                            let worker = ctx
+                                .client
+                                .start_worker(bench_worker_options(1, Duration::from_secs(120)))
+                                .await;
 
                             wait_for_tasks_complete(&ctx.pool, &ctx.queue_name, 1, 120).await;
                             total_time += start.elapsed();
