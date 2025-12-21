@@ -339,7 +339,7 @@ impl Worker {
             Ok(ctx) => ctx,
             Err(e) => {
                 tracing::error!("Failed to create task context: {}", e);
-                Self::fail_run(&pool, &queue_name, task.run_id, &e.into()).await;
+                Self::fail_run(&pool, &queue_name, task.task_id, task.run_id, &e.into()).await;
                 return;
             }
         };
@@ -353,6 +353,7 @@ impl Worker {
                 Self::fail_run(
                     &pool,
                     &queue_name,
+                    task.task_id,
                     task.run_id,
                     &TaskError::Validation {
                         message: format!("Unknown task: {}", task.task_name),
@@ -493,7 +494,7 @@ impl Worker {
                 {
                     outcome = "completed";
                 }
-                Self::complete_run(&pool, &queue_name, task.run_id, output).await;
+                Self::complete_run(&pool, &queue_name, task.task_id, task.run_id, output).await;
 
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::record_task_completed(&queue_name_for_metrics, &task_name);
@@ -521,7 +522,7 @@ impl Worker {
                     outcome = "failed";
                 }
                 tracing::error!("Task {} failed: {}", task_label, e);
-                Self::fail_run(&pool, &queue_name, task.run_id, e).await;
+                Self::fail_run(&pool, &queue_name, task.task_id, task.run_id, e).await;
 
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::record_task_failed(
@@ -545,10 +546,17 @@ impl Worker {
         }
     }
 
-    async fn complete_run(pool: &PgPool, queue_name: &str, run_id: Uuid, result: JsonValue) {
-        let query = "SELECT durable.complete_run($1, $2, $3)";
+    async fn complete_run(
+        pool: &PgPool,
+        queue_name: &str,
+        task_id: Uuid,
+        run_id: Uuid,
+        result: JsonValue,
+    ) {
+        let query = "SELECT durable.complete_run($1, $2, $3, $4)";
         if let Err(e) = sqlx::query(query)
             .bind(queue_name)
+            .bind(task_id)
             .bind(run_id)
             .bind(&result)
             .execute(pool)
@@ -558,11 +566,18 @@ impl Worker {
         }
     }
 
-    async fn fail_run(pool: &PgPool, queue_name: &str, run_id: Uuid, error: &TaskError) {
+    async fn fail_run(
+        pool: &PgPool,
+        queue_name: &str,
+        task_id: Uuid,
+        run_id: Uuid,
+        error: &TaskError,
+    ) {
         let error_json = serialize_task_error(error);
-        let query = "SELECT durable.fail_run($1, $2, $3, $4)";
+        let query = "SELECT durable.fail_run($1, $2, $3, $4, $5)";
         if let Err(e) = sqlx::query(query)
             .bind(queue_name)
+            .bind(task_id)
             .bind(run_id)
             .bind(&error_json)
             .bind(None::<DateTime<Utc>>)

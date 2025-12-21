@@ -420,6 +420,7 @@ begin
   loop
     perform durable.fail_run(
       p_queue_name,
+      v_expired_run.task_id,
       v_expired_run.run_id,
       jsonb_strip_nulls(jsonb_build_object(
         'name', '$ClaimTimeout',
@@ -522,6 +523,7 @@ $$;
 -- Marks a run as completed
 create function durable.complete_run (
   p_queue_name text,
+  p_task_id uuid,
   p_run_id uuid,
   p_state jsonb default null
 )
@@ -529,28 +531,12 @@ create function durable.complete_run (
   language plpgsql
 as $$
 declare
-  v_task_id uuid;
   v_task_id_locked uuid;
   v_run_task_id uuid;
   v_state text;
   v_now timestamptz := durable.current_time();
 begin
   -- Lock task first to keep a consistent task -> run lock order.
-  -- Find task for this run (no lock).
-  execute format(
-    'select task_id
-       from durable.%I
-      where run_id = $1',
-    'r_' || p_queue_name
-  )
-  into v_task_id
-  using p_run_id;
-
-  if v_task_id is null then
-    raise exception 'Run "%" not found in queue "%"', p_run_id, p_queue_name;
-  end if;
-
-  -- Lock the task
   execute format(
     'select task_id
        from durable.%I
@@ -559,10 +545,10 @@ begin
     't_' || p_queue_name
   )
   into v_task_id_locked
-  using v_task_id;
+  using p_task_id;
 
   if v_task_id_locked is null then
-    raise exception 'Task "%" not found in queue "%"', v_task_id, p_queue_name;
+    raise exception 'Task "%" not found in queue "%"', p_task_id, p_queue_name;
   end if;
 
   -- Lock the run after the task lock
@@ -580,8 +566,8 @@ begin
     raise exception 'Run "%" not found in queue "%"', p_run_id, p_queue_name;
   end if;
 
-  if v_run_task_id <> v_task_id then
-    raise exception 'Run "%" does not belong to task "%"', p_run_id, v_task_id;
+  if v_run_task_id <> p_task_id then
+    raise exception 'Run "%" does not belong to task "%"', p_run_id, p_task_id;
   end if;
 
   if v_state <> 'running' then
@@ -606,12 +592,12 @@ begin
             last_attempt_run = $3
       where task_id = $1',
     't_' || p_queue_name
-  ) using v_task_id, p_state, p_run_id;
+  ) using p_task_id, p_state, p_run_id;
 
   -- Cleanup: delete waiters and emit completion event for parent
   perform durable.cleanup_task_terminal(
     p_queue_name,
-    v_task_id,
+    p_task_id,
     'completed',
     jsonb_build_object('result', p_state),
     false  -- don't cascade cancel children for completed tasks
@@ -824,6 +810,7 @@ $$;
 
 create function durable.fail_run (
   p_queue_name text,
+  p_task_id uuid,
   p_run_id uuid,
   p_reason jsonb,
   p_retry_at timestamptz default null
@@ -832,7 +819,6 @@ create function durable.fail_run (
   language plpgsql
 as $$
 declare
-  v_task_id uuid;
   v_run_task_id uuid;
   v_attempt integer;
   v_retry_strategy jsonb;
@@ -857,21 +843,6 @@ declare
   v_cancelled_at timestamptz := null;
 begin
   -- Lock task first to keep a consistent task -> run lock order.
-  -- Find task for this run (no lock).
-  execute format(
-    'select task_id
-       from durable.%I
-      where run_id = $1',
-    'r_' || p_queue_name
-  )
-  into v_task_id
-  using p_run_id;
-
-  if v_task_id is null then
-    raise exception 'Run "%" cannot be failed in queue "%"', p_run_id, p_queue_name;
-  end if;
-
-  -- Lock task and get retry strategy
   execute format(
     'select retry_strategy, max_attempts, first_started_at, cancellation, state
        from durable.%I
@@ -880,7 +851,11 @@ begin
     't_' || p_queue_name
   )
   into v_retry_strategy, v_max_attempts, v_first_started, v_cancellation, v_task_state
-  using v_task_id;
+  using p_task_id;
+
+  if v_task_state is null then
+    raise exception 'Task "%" not found in queue "%"', p_task_id, p_queue_name;
+  end if;
 
   -- Lock run after task and ensure it's still eligible
   execute format(
@@ -898,8 +873,8 @@ begin
     raise exception 'Run "%" cannot be failed in queue "%"', p_run_id, p_queue_name;
   end if;
 
-  if v_run_task_id <> v_task_id then
-    raise exception 'Run "%" does not belong to task "%"', p_run_id, v_task_id;
+  if v_run_task_id <> p_task_id then
+    raise exception 'Run "%" does not belong to task "%"', p_run_id, p_task_id;
   end if;
 
   -- Actually fail the run
@@ -965,7 +940,7 @@ begin
         'r_' || p_queue_name,
         v_task_state_after
       )
-      using v_new_run_id, v_task_id, v_next_attempt, v_next_available;
+      using v_new_run_id, p_task_id, v_next_attempt, v_next_available;
     end if;
   end if;
 
@@ -985,7 +960,7 @@ begin
       where task_id = $1',
     't_' || p_queue_name,
     v_task_state_after
-  ) using v_task_id, v_task_state_after, v_recorded_attempt, v_last_attempt_run, v_cancelled_at;
+  ) using p_task_id, v_task_state_after, v_recorded_attempt, v_last_attempt_run, v_cancelled_at;
 
   -- Delete wait registrations for this run
   execute format(
@@ -997,7 +972,7 @@ begin
   if v_task_state_after in ('failed', 'cancelled') then
     perform durable.cleanup_task_terminal(
       p_queue_name,
-      v_task_id,
+      p_task_id,
       v_task_state_after,
       jsonb_build_object('error', p_reason),
       true  -- cascade cancel children
