@@ -796,41 +796,10 @@ async fn test_emit_event_with_empty_name_fails(pool: PgPool) -> sqlx::Result<()>
 }
 
 // ============================================================================
-// Advisory Lock Tests
+// Lock Tests
 // ============================================================================
 
-/// Test that both await_event and emit_event use advisory locks for synchronization.
-/// This verifies the implementation calls lock_event() by inspecting function definitions.
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn test_event_functions_use_advisory_locks(pool: PgPool) -> sqlx::Result<()> {
-    // Check that await_event calls lock_event
-    let await_def: (String,) = sqlx::query_as(
-        "SELECT pg_get_functiondef(oid) FROM pg_proc WHERE proname = 'await_event' AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'durable')"
-    )
-    .fetch_one(&pool)
-    .await?;
-
-    assert!(
-        await_def.0.contains("lock_event"),
-        "await_event should call lock_event for advisory locking"
-    );
-
-    // Check that emit_event calls lock_event
-    let emit_def: (String,) = sqlx::query_as(
-        "SELECT pg_get_functiondef(oid) FROM pg_proc WHERE proname = 'emit_event' AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'durable')"
-    )
-    .fetch_one(&pool)
-    .await?;
-
-    assert!(
-        emit_def.0.contains("lock_event"),
-        "emit_event should call lock_event for advisory locking"
-    );
-
-    Ok(())
-}
-
-/// Stress test to verify that advisory locks prevent lost wakeups.
+/// Stress test to verify that locking prevent lost wakeups.
 /// This test spawns many tasks waiting on distinct events and emits all events
 /// with jittered timing to maximize race condition likelihood.
 #[sqlx::test(migrator = "MIGRATOR")]
