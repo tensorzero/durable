@@ -1018,9 +1018,6 @@ async fn test_await_emit_event_race_does_not_lose_wakeup(pool: PgPool) -> sqlx::
     let event_name_clone = event_name.to_string();
     let await_handle = tokio::spawn(async move {
         let mut conn = PgConnection::connect_with(&await_opts).await?;
-        sqlx::query("SET timezone TO 'UTC'")
-            .execute(&mut conn)
-            .await?;
 
         let result: (bool, Option<serde_json::Value>) = sqlx::query_as(
             "SELECT should_suspend, payload FROM durable.await_event($1, $2, $3, $4, $5, $6)",
