@@ -44,7 +44,8 @@ async fn test_emit_event_wakes_waiter(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for task to start waiting
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -117,7 +118,8 @@ async fn test_event_already_emitted_returns_immediately(pool: PgPool) -> sqlx::R
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Task should complete quickly since event exists
     let terminal = wait_for_task_terminal(
@@ -174,7 +176,8 @@ async fn test_event_timeout_triggers(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for task to fail due to timeout
     let terminal = wait_for_task_terminal(
@@ -231,7 +234,8 @@ async fn test_multiple_waiters_same_event(pool: PgPool) -> sqlx::Result<()> {
             concurrency: 3,
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for all tasks to start waiting
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -295,7 +299,8 @@ async fn test_event_payload_preserved_on_retry(pool: PgPool) -> sqlx::Result<()>
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for task to start waiting for event
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -365,7 +370,8 @@ async fn test_event_last_write_wins(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -416,7 +422,8 @@ async fn test_multiple_distinct_events(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for task to start
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -486,7 +493,8 @@ async fn test_event_write_does_not_propagate_after_wake(pool: PgPool) -> sqlx::R
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for task to start waiting for event
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -557,7 +565,8 @@ async fn test_emit_from_different_task(pool: PgPool) -> sqlx::Result<()> {
             concurrency: 2,
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for waiter to start
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -731,7 +740,8 @@ async fn test_event_timeout_error_payload(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for task to fail due to timeout
     let terminal = wait_for_task_terminal(

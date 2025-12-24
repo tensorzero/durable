@@ -49,7 +49,8 @@ async fn test_retry_strategy_none_no_retry(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -103,7 +104,8 @@ async fn test_retry_strategy_fixed_delay(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for first attempt to fail
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -183,7 +185,8 @@ async fn test_retry_strategy_exponential_backoff(pool: PgPool) -> sqlx::Result<(
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for first attempt to fail
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -263,7 +266,8 @@ async fn test_max_attempts_honored(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for all attempts to complete
     let terminal = wait_for_task_terminal(

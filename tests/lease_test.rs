@@ -50,7 +50,8 @@ async fn test_claim_sets_correct_expiry(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout,
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for the task to be claimed
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -108,7 +109,8 @@ async fn test_heartbeat_extends_lease(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout,
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for task to be claimed
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -180,7 +182,8 @@ async fn test_checkpoint_extends_lease(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout,
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for task to start running
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -247,7 +250,8 @@ async fn test_heartbeat_detects_cancellation(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for task to start executing
     tokio::time::sleep(Duration::from_millis(500)).await;

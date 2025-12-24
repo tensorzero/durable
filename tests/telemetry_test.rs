@@ -159,7 +159,8 @@ async fn test_task_lifecycle_metrics(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for task to complete
     wait_for_task_state(
@@ -244,7 +245,8 @@ async fn test_task_failure_metrics(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Wait for task to fail
     wait_for_task_state(
@@ -288,7 +290,8 @@ async fn test_worker_gauge_metrics(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     // Give the worker time to set its active gauge
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -356,7 +359,8 @@ async fn test_checkpoint_metrics(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     wait_for_task_state(
         &pool,
@@ -416,7 +420,8 @@ async fn test_task_execution_duration_metrics(pool: PgPool) -> sqlx::Result<()> 
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await.unwrap();
+        .await
+        .unwrap();
 
     wait_for_task_state(
         &pool,

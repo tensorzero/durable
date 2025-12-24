@@ -62,7 +62,8 @@ async fn test_task_claimed_by_exactly_one_worker(pool: PgPool) -> sqlx::Result<(
                     concurrency: 1,
                     ..Default::default()
                 })
-                .await.unwrap();
+                .await
+                .unwrap();
 
             // Let workers run for a bit
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -161,7 +162,8 @@ async fn test_concurrent_claims_with_skip_locked(pool: PgPool) -> sqlx::Result<(
                     concurrency: 5, // Each worker handles multiple tasks
                     ..Default::default()
                 })
-                .await.unwrap();
+                .await
+                .unwrap();
 
             // Let workers process tasks
             tokio::time::sleep(Duration::from_secs(3)).await;
