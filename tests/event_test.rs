@@ -337,9 +337,10 @@ async fn test_event_payload_preserved_on_retry(pool: PgPool) -> sqlx::Result<()>
     Ok(())
 }
 
-/// Test that emitting an event with the same name updates the payload (last-write-wins).
+/// Test that emitting an event with the same name keeps the first payload (first-writer-wins).
+/// Subsequent emits for the same event are no-ops to maintain consistency with lost-wakeup prevention.
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn test_event_last_write_wins(pool: PgPool) -> sqlx::Result<()> {
+async fn test_event_first_writer_wins(pool: PgPool) -> sqlx::Result<()> {
     let client = create_client(pool.clone(), "event_dedup").await;
     client.create_queue(None).await.unwrap();
     client.register::<EventWaitingTask>().await.unwrap();
@@ -384,7 +385,7 @@ async fn test_event_last_write_wins(pool: PgPool) -> sqlx::Result<()> {
 
     assert_eq!(terminal, Some("completed".to_string()));
 
-    // Should receive the second payload (last-write-wins)
+    // Should receive the first payload (first-writer-wins)
     let query = AssertSqlSafe(
         "SELECT completed_payload FROM durable.t_event_dedup WHERE task_id = $1".to_string(),
     );
@@ -393,7 +394,7 @@ async fn test_event_last_write_wins(pool: PgPool) -> sqlx::Result<()> {
         .fetch_one(&pool)
         .await?;
 
-    assert_eq!(result.0, json!({"version": "second"}));
+    assert_eq!(result.0, json!({"version": "first"}));
 
     Ok(())
 }
@@ -801,5 +802,154 @@ async fn test_emit_event_with_empty_name_fails(pool: PgPool) -> sqlx::Result<()>
         Ok(_) => panic!("Expected error, but emit_event succeeded"),
     }
 
+    Ok(())
+}
+
+// ============================================================================
+// Advisory Lock Tests
+// ============================================================================
+
+/// Test that both await_event and emit_event use advisory locks for synchronization.
+/// This verifies the implementation calls lock_event() by inspecting function definitions.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_event_functions_use_advisory_locks(pool: PgPool) -> sqlx::Result<()> {
+    // Check that await_event calls lock_event
+    let await_def: (String,) = sqlx::query_as(
+        "SELECT pg_get_functiondef(oid) FROM pg_proc WHERE proname = 'await_event' AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'durable')"
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    assert!(
+        await_def.0.contains("lock_event"),
+        "await_event should call lock_event for advisory locking"
+    );
+
+    // Check that emit_event calls lock_event
+    let emit_def: (String,) = sqlx::query_as(
+        "SELECT pg_get_functiondef(oid) FROM pg_proc WHERE proname = 'emit_event' AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'durable')"
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    assert!(
+        emit_def.0.contains("lock_event"),
+        "emit_event should call lock_event for advisory locking"
+    );
+
+    Ok(())
+}
+
+/// Stress test to verify that advisory locks prevent lost wakeups.
+/// This test spawns many tasks waiting on distinct events and emits all events
+/// with jittered timing to maximize race condition likelihood.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_event_race_stress(pool: PgPool) -> sqlx::Result<()> {
+    // Configurable via environment variables for CI tuning
+    let rounds: usize = std::env::var("DURABLE_EVENT_RACE_ROUNDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(4);
+    let tasks_per_round: usize = std::env::var("DURABLE_EVENT_RACE_TASKS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(128);
+    let jitter_ms: u64 = std::env::var("DURABLE_EVENT_RACE_JITTER_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8);
+
+    let client = create_client(pool.clone(), "event_race").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<EventWaitingTask>().await.unwrap();
+
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.01,
+            claim_timeout: 60,
+            concurrency: 32,
+            ..Default::default()
+        })
+        .await;
+
+    for round in 0..rounds {
+        let mut task_ids = Vec::with_capacity(tasks_per_round);
+        let mut event_names = Vec::with_capacity(tasks_per_round);
+
+        // Spawn tasks waiting on unique events
+        for i in 0..tasks_per_round {
+            let event_name = format!("race_event_r{}_{}", round, i);
+            event_names.push(event_name.clone());
+
+            let spawn_result = client
+                .spawn::<EventWaitingTask>(EventWaitParams {
+                    event_name,
+                    timeout_seconds: Some(30),
+                })
+                .await
+                .expect("Failed to spawn task");
+            task_ids.push(spawn_result.task_id);
+        }
+
+        // Brief pause to let tasks start waiting
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Emit all events with jittered timing to maximize race conditions
+        let pool_for_emit = pool.clone();
+        let emit_handles: Vec<_> = event_names
+            .into_iter()
+            .enumerate()
+            .map(|(i, event_name)| {
+                let pool = pool_for_emit.clone();
+                tokio::spawn(async move {
+                    // Jitter: vary start times
+                    let jitter = Duration::from_micros((i as u64 * 17) % (jitter_ms * 1000));
+                    tokio::time::sleep(jitter).await;
+                    let emit_client = create_client(pool, "event_race").await;
+                    emit_client
+                        .emit_event::<serde_json::Value>(&event_name, &json!({"idx": i}), None)
+                        .await
+                        .expect("Failed to emit event");
+                })
+            })
+            .collect();
+
+        // Wait for all emits to complete
+        for handle in emit_handles {
+            handle.await.expect("Emit task panicked");
+        }
+
+        // Check for orphaned waiters (wait registrations for already-emitted events)
+        // This indicates a lost wakeup
+        let orphaned_count: (i64,) = sqlx::query_as(AssertSqlSafe(
+            "SELECT COUNT(*) FROM durable.w_event_race w
+             WHERE EXISTS (SELECT 1 FROM durable.e_event_race e WHERE e.event_name = w.event_name)"
+                .to_string(),
+        ))
+        .fetch_one(&pool)
+        .await?;
+
+        if orphaned_count.0 > 0 {
+            panic!(
+                "Round {}: Found {} orphaned waiters for already-emitted events (lost wakeup detected!)",
+                round, orphaned_count.0
+            );
+        }
+
+        // Wait for all tasks to complete
+        for task_id in task_ids {
+            let terminal =
+                wait_for_task_terminal(&pool, "event_race", task_id, Duration::from_secs(10))
+                    .await?;
+            assert_eq!(
+                terminal,
+                Some("completed".to_string()),
+                "Round {}: Task should complete after event is emitted",
+                round
+            );
+        }
+    }
+
+    worker.shutdown().await;
     Ok(())
 }
