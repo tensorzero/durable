@@ -4,6 +4,7 @@ use sqlx::{Executor, PgPool, Postgres};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -599,15 +600,25 @@ where
     }
 
     /// Start a worker that processes tasks from the queue
-    pub async fn start_worker(&self, options: WorkerOptions) -> Worker {
-        Worker::start(
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DurableError::InvalidConfiguration`] if `claim_timeout` is less than 1 second.
+    pub async fn start_worker(&self, options: WorkerOptions) -> DurableResult<Worker> {
+        if options.claim_timeout < Duration::from_secs(1) {
+            return Err(DurableError::InvalidConfiguration {
+                reason: "claim_timeout must be at least 1 second".to_string(),
+            });
+        }
+
+        Ok(Worker::start(
             self.pool.clone(),
             self.queue_name.clone(),
             self.registry.clone(),
             options,
             self.state.clone(),
         )
-        .await
+        .await)
     }
 
     /// Close the client. Closes the pool if owned.

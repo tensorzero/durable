@@ -59,7 +59,7 @@ async fn test_checkpoint_prevents_step_reexecution(pool: PgPool) -> sqlx::Result
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for task to fail (will hit max attempts since fail_after_step2 is always true)
     let terminal = wait_for_task_terminal(
@@ -100,7 +100,7 @@ async fn test_checkpoint_prevents_step_reexecution(pool: PgPool) -> sqlx::Result
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     let terminal2 = wait_for_task_terminal(
         &pool,
@@ -156,7 +156,7 @@ async fn test_deterministic_rand_preserved_on_retry(pool: PgPool) -> sqlx::Resul
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -219,7 +219,7 @@ async fn test_deterministic_now_preserved_on_retry(pool: PgPool) -> sqlx::Result
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -279,7 +279,7 @@ async fn test_deterministic_uuid7_preserved_on_retry(pool: PgPool) -> sqlx::Resu
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -328,7 +328,7 @@ async fn test_long_workflow_many_steps(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(60),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -380,7 +380,7 @@ async fn test_large_payload_checkpoint(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(60),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,

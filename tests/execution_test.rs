@@ -87,7 +87,7 @@ async fn test_simple_task_executes_and_completes(pool: PgPool) -> sqlx::Result<(
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for task to complete
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -133,7 +133,7 @@ async fn test_task_state_transitions(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for task to complete
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -163,7 +163,7 @@ async fn test_empty_params_task_executes(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     worker.shutdown().await;
@@ -200,7 +200,7 @@ async fn test_multi_step_task_completes_all_steps(pool: PgPool) -> sqlx::Result<
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     worker.shutdown().await;
@@ -251,7 +251,7 @@ async fn test_multiple_tasks_execute_concurrently(pool: PgPool) -> sqlx::Result<
             concurrency: 5,
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for all tasks to complete
     tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -290,7 +290,7 @@ async fn test_worker_concurrency_limit_respected(pool: PgPool) -> sqlx::Result<(
             concurrency: 2, // Only 2 at a time
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Give some time for processing
     tokio::time::sleep(Duration::from_millis(2000)).await;
@@ -327,7 +327,7 @@ async fn test_worker_graceful_shutdown_waits(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Very short wait, then shutdown
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -398,7 +398,7 @@ async fn test_task_result_stored_correctly(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     worker.shutdown().await;
@@ -434,7 +434,7 @@ async fn test_research_task_readme_example(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     worker.shutdown().await;
@@ -482,7 +482,7 @@ async fn test_convenience_methods_execute(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     worker.shutdown().await;
@@ -533,7 +533,7 @@ async fn test_multiple_convenience_calls_produce_different_values(
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     worker.shutdown().await;
@@ -576,7 +576,7 @@ async fn test_reserved_prefix_rejected(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     worker.shutdown().await;
@@ -615,7 +615,7 @@ async fn test_reserved_prefix_error_payload(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     worker.shutdown().await;
@@ -676,7 +676,7 @@ async fn test_long_running_task_with_heartbeat_completes(pool: PgPool) -> sqlx::
             claim_timeout: Duration::from_secs(1), // 1 second claim timeout - task runs for 3x this duration
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for task to complete (3 seconds + buffer)
     tokio::time::sleep(Duration::from_millis(4000)).await;
@@ -795,7 +795,7 @@ async fn test_task_uses_application_state(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for task to complete
     tokio::time::sleep(Duration::from_millis(500)).await;

@@ -62,7 +62,8 @@ fn bench_concurrent_claims(c: &mut Criterion) {
                                             1,
                                             Duration::from_secs(60),
                                         ))
-                                        .await;
+                                        .await
+                                        .unwrap();
 
                                     // Wait a bit then shutdown
                                     tokio::time::sleep(Duration::from_secs(15)).await;
@@ -151,7 +152,8 @@ fn bench_claim_latency_distribution(c: &mut Criterion) {
                                             4,
                                             Duration::from_secs(60),
                                         ))
-                                        .await;
+                                        .await
+                                        .unwrap();
 
                                     tokio::time::sleep(Duration::from_secs(20)).await;
                                     worker.shutdown().await;

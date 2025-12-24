@@ -42,7 +42,8 @@ fn bench_step_cache_miss(c: &mut Criterion) {
                             let worker = ctx
                                 .client
                                 .start_worker(bench_worker_options(1, Duration::from_secs(120)))
-                                .await;
+                                .await
+                                .unwrap();
 
                             wait_for_tasks_complete(&ctx.pool, &ctx.queue_name, 1, 60).await;
                             total_time += start.elapsed();
@@ -94,7 +95,8 @@ fn bench_step_cache_hit(c: &mut Criterion) {
                             let worker = ctx
                                 .client
                                 .start_worker(bench_worker_options(1, Duration::from_secs(120)))
-                                .await;
+                                .await
+                                .unwrap();
 
                             wait_for_tasks_complete(&ctx.pool, &ctx.queue_name, 1, 60).await;
                             worker.shutdown().await;
@@ -126,7 +128,8 @@ fn bench_step_cache_hit(c: &mut Criterion) {
                             let worker = ctx
                                 .client
                                 .start_worker(bench_worker_options(1, Duration::from_secs(120)))
-                                .await;
+                                .await
+                                .unwrap();
 
                             wait_for_tasks_complete(&ctx.pool, &ctx.queue_name, 1, 60).await;
                             total_time += start.elapsed();
@@ -182,7 +185,8 @@ fn bench_large_payload_checkpoint(c: &mut Criterion) {
                             let worker = ctx
                                 .client
                                 .start_worker(bench_worker_options(1, Duration::from_secs(120)))
-                                .await;
+                                .await
+                                .unwrap();
 
                             wait_for_tasks_complete(&ctx.pool, &ctx.queue_name, 1, 120).await;
                             total_time += start.elapsed();

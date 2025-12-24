@@ -442,9 +442,11 @@ where
     ///
     /// # Arguments
     /// * `duration` - Extension duration. Defaults to original claim_timeout.
+    ///   Must be at least 1 second.
     ///
     /// # Errors
-    /// Returns `TaskError::Control(Cancelled)` if the task was cancelled.
+    /// - Returns `TaskError::Validation` if duration is less than 1 second.
+    /// - Returns `TaskError::Control(Cancelled)` if the task was cancelled.
     #[cfg_attr(
         feature = "telemetry",
         tracing::instrument(
@@ -455,6 +457,12 @@ where
     )]
     pub async fn heartbeat(&self, duration: Option<std::time::Duration>) -> TaskResult<()> {
         let extend_by = duration.unwrap_or(self.claim_timeout);
+
+        if extend_by < std::time::Duration::from_secs(1) {
+            return Err(TaskError::Validation {
+                message: "heartbeat duration must be at least 1 second".to_string(),
+            });
+        }
 
         let query = "SELECT durable.extend_claim($1, $2, $3)";
         sqlx::query(query)

@@ -52,7 +52,7 @@ async fn test_db_connection_lost_during_checkpoint(pool: PgPool) -> sqlx::Result
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for task to fail (will retry but always fail after step 2)
     let terminal = wait_for_task_terminal(
@@ -117,7 +117,7 @@ async fn test_stale_worker_checkpoint_rejected(pool: PgPool) -> sqlx::Result<()>
             claim_timeout,
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for task to be claimed
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -135,7 +135,7 @@ async fn test_stale_worker_checkpoint_rejected(pool: PgPool) -> sqlx::Result<()>
             claim_timeout: Duration::from_secs(60), // Longer timeout
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for reclaim to happen
     tokio::time::sleep(Duration::from_secs(2)).await;

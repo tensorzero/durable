@@ -271,6 +271,15 @@ pub enum DurableError {
         /// The reason the event name was invalid.
         reason: String,
     },
+
+    /// Configuration validation failed.
+    ///
+    /// Returned when worker options contain invalid values.
+    #[error("invalid configuration: {reason}")]
+    InvalidConfiguration {
+        /// The reason the configuration was invalid.
+        reason: String,
+    },
 }
 
 /// Result type alias for Client API operations.

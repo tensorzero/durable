@@ -60,7 +60,7 @@ async fn test_crash_mid_step_resumes_from_checkpoint(pool: PgPool) -> sqlx::Resu
                 claim_timeout: Duration::from_secs(30),
                 ..Default::default()
             })
-            .await;
+            .await.unwrap();
 
         // Wait for some progress
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -83,7 +83,7 @@ async fn test_crash_mid_step_resumes_from_checkpoint(pool: PgPool) -> sqlx::Resu
             claim_timeout: Duration::from_secs(5), // Short timeout to reclaim quickly
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for task to reach terminal state
     let terminal = wait_for_task_terminal(
@@ -133,7 +133,7 @@ async fn test_worker_drop_without_shutdown(pool: PgPool) -> sqlx::Result<()> {
                 claim_timeout,
                 ..Default::default()
             })
-            .await;
+            .await.unwrap();
 
         // Wait for task to start
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -156,7 +156,7 @@ async fn test_worker_drop_without_shutdown(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(60), // Longer timeout for second worker
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Give time for reclaim and some progress
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -204,7 +204,7 @@ async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> 
             claim_timeout,
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for task to start
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -225,7 +225,7 @@ async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> 
             claim_timeout: Duration::from_secs(60), // Longer timeout this time
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Give second worker time to reclaim
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -267,7 +267,7 @@ async fn test_heartbeat_prevents_lease_expiration(pool: PgPool) -> sqlx::Result<
             claim_timeout,
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for task to complete
     let terminal = wait_for_task_terminal(
@@ -316,7 +316,7 @@ async fn test_spawn_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
             concurrency: 2, // Handle parent and child
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for parent to complete
     let terminal = wait_for_task_terminal(
@@ -390,7 +390,7 @@ async fn test_step_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -457,7 +457,7 @@ async fn test_cpu_bound_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout,
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for task to be claimed and start
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -516,7 +516,7 @@ async fn test_slow_task_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
             claim_timeout,
             ..Default::default()
         })
-        .await;
+        .await.unwrap();
 
     // Wait for task to be claimed and start sleeping
     tokio::time::sleep(Duration::from_millis(500)).await;

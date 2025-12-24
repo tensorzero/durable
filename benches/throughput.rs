@@ -76,7 +76,8 @@ fn bench_task_throughput(c: &mut Criterion) {
                                     concurrency,
                                     Duration::from_secs(60),
                                 ))
-                                .await;
+                                .await
+                                .unwrap();
 
                             wait_for_tasks_complete(
                                 &ctx.pool,
@@ -118,7 +119,8 @@ fn bench_e2e_completion(c: &mut Criterion) {
                 let worker = ctx
                     .client
                     .start_worker(bench_worker_options(1, Duration::from_secs(60)))
-                    .await;
+                    .await
+                    .unwrap();
 
                 let start = std::time::Instant::now();
                 for i in 0..iters {
