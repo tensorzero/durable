@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1766604101466,
+  "lastUpdate": 1766606580645,
   "repoUrl": "https://github.com/tensorzero/durable",
   "entries": {
     "Criterion Benchmark": [
@@ -449,6 +449,156 @@ window.BENCHMARK_DATA = {
             "name": "e2e_completion/single_task_roundtrip",
             "value": 14744272,
             "range": "± 385795",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "virajmehta@users.noreply.github.com",
+            "name": "Viraj Mehta",
+            "username": "virajmehta"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e378ba1ee9b9c6cc2a020aa21b75f0c35b529bc8",
+          "message": "improved fix for event race and added a better test (#42)\n\n* improved fix for event race and added a better test based on https://github.com/earendil-works/absurd/pull/61\n\n* removed timestamp set\n\n* removed unnecessary test\n\n* fixed issue with overwriting event\n\n* fixed issue with overwriting event\n\n* merged",
+          "timestamp": "2025-12-24T19:27:02Z",
+          "tree_id": "4e2da30940cc819ed2fe0745581ea2536428fc99",
+          "url": "https://github.com/tensorzero/durable/commit/e378ba1ee9b9c6cc2a020aa21b75f0c35b529bc8"
+        },
+        "date": 1766606580268,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "step_cache_miss/steps/10",
+            "value": 46385721,
+            "range": "± 1097340",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/50",
+            "value": 91767920,
+            "range": "± 1029354",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/100",
+            "value": 149403919,
+            "range": "± 1192100",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/10",
+            "value": 12047569,
+            "range": "± 269255",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/50",
+            "value": 12134492,
+            "range": "± 422911",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/100",
+            "value": 12038790,
+            "range": "± 534753",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1",
+            "value": 29273543,
+            "range": "± 1415905",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/100",
+            "value": 24180834,
+            "range": "± 247064",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1000",
+            "value": 72122109,
+            "range": "± 5819430",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/2",
+            "value": 625173997,
+            "range": "± 10793584",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/4",
+            "value": 397453693,
+            "range": "± 7927981",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/8",
+            "value": 360067808,
+            "range": "± 4367351",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/16",
+            "value": 363334873,
+            "range": "± 6280254",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/baseline",
+            "value": 156870056,
+            "range": "± 6855248",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/contention",
+            "value": 108749311,
+            "range": "± 10436280",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "spawn_latency/single_spawn",
+            "value": 924002,
+            "range": "± 685623",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/1",
+            "value": 562913667,
+            "range": "± 5749060",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/2",
+            "value": 350284224,
+            "range": "± 4524069",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/4",
+            "value": 252613356,
+            "range": "± 3167149",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/8",
+            "value": 194481172,
+            "range": "± 2664911",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "e2e_completion/single_task_roundtrip",
+            "value": 14780129,
+            "range": "± 537872",
             "unit": "ns/iter"
           }
         ]
