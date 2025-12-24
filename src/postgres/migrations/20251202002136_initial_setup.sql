@@ -1262,10 +1262,15 @@ begin
 
   -- Insert the event into the events table (first-writer-wins).
   -- Subsequent emits for the same event are no-ops.
+  -- We use DO UPDATE WHERE payload IS NULL to handle the case where await_event
+  -- created a placeholder row before emit_event ran.
   execute format(
     'insert into durable.%I (event_name, payload, emitted_at)
      values ($1, $2, $3)
-     on conflict (event_name) do nothing',
+     on conflict (event_name) do update
+        set payload = excluded.payload, emitted_at = excluded.emitted_at
+      where durable.%I.payload is null',
+    'e_' || p_queue_name,
     'e_' || p_queue_name
   ) using p_event_name, v_payload, v_now;
 

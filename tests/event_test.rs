@@ -1113,3 +1113,101 @@ async fn test_await_emit_event_race_does_not_lose_wakeup(pool: PgPool) -> sqlx::
 
     Ok(())
 }
+
+/// Regression test: a task that awaits an event AFTER another task already
+/// registered a waiter and the event was emitted should still see the payload.
+///
+/// This tests the bug where await_event creates a placeholder row with NULL payload,
+/// and emit_event's ON CONFLICT DO NOTHING would fail to update it, causing late
+/// joiners to see NULL and sleep forever.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_await_event_late_joiner_sees_payload(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "late_join").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<EventWaitingTask>().await.unwrap();
+
+    let event_name = "late-joiner-event";
+    let payload = json!({"late": "joiner"});
+
+    // Spawn Task A that waits for the event
+    let task_a = client
+        .spawn::<EventWaitingTask>(EventWaitParams {
+            event_name: event_name.to_string(),
+            timeout_seconds: Some(30),
+        })
+        .await
+        .expect("Failed to spawn task A");
+
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: 0.05,
+            claim_timeout: 30,
+            ..Default::default()
+        })
+        .await;
+
+    // Wait for Task A to start waiting (creates placeholder row in e_ table)
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let state = get_task_state(&pool, "late_join", task_a.task_id).await?;
+    assert!(
+        state == Some("sleeping".to_string()) || state == Some("running".to_string()),
+        "Task A should be sleeping or running, got {:?}",
+        state
+    );
+
+    // Emit the event - this should update the placeholder row with the real payload
+    client
+        .emit_event(event_name, &payload, None)
+        .await
+        .expect("Failed to emit event");
+
+    // Wait for Task A to complete
+    let terminal_a = wait_for_task_terminal(
+        &pool,
+        "late_join",
+        task_a.task_id,
+        Duration::from_secs(5),
+    )
+    .await?;
+    assert_eq!(terminal_a, Some("completed".to_string()), "Task A should complete");
+
+    // Now spawn Task B - it should see the event was already emitted and complete immediately
+    let task_b = client
+        .spawn::<EventWaitingTask>(EventWaitParams {
+            event_name: event_name.to_string(),
+            timeout_seconds: Some(2), // Short timeout to fail fast if bug exists
+        })
+        .await
+        .expect("Failed to spawn task B");
+
+    // Task B should complete quickly since event already exists with payload
+    let terminal_b = wait_for_task_terminal(
+        &pool,
+        "late_join",
+        task_b.task_id,
+        Duration::from_secs(3),
+    )
+    .await?;
+
+    worker.shutdown().await;
+
+    assert_eq!(
+        terminal_b,
+        Some("completed".to_string()),
+        "Task B (late joiner) should complete immediately, not sleep forever"
+    );
+
+    // Verify Task B received the correct payload
+    let query = AssertSqlSafe(
+        "SELECT completed_payload FROM durable.t_late_join WHERE task_id = $1".to_string(),
+    );
+    let result: (serde_json::Value,) = sqlx::query_as(query)
+        .bind(task_b.task_id)
+        .fetch_one(&pool)
+        .await?;
+
+    assert_eq!(result.0, payload, "Task B should receive the emitted payload");
+
+    Ok(())
+}
