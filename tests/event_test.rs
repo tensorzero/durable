@@ -865,12 +865,13 @@ async fn test_event_race_stress(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.01,
-            claim_timeout: 60,
+            poll_interval: Duration::from_millis(10),
+            claim_timeout: Duration::from_secs(60),
             concurrency: 32,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     for round in 0..rounds {
         let mut task_ids = Vec::with_capacity(tasks_per_round);
