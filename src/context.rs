@@ -307,13 +307,15 @@ where
         let checkpoint_name = self.get_checkpoint_name(name, &())?;
         let duration_ms = duration.as_millis() as i64;
 
-        let (needs_suspend,): (bool,) = sqlx::query_as("SELECT durable.sleep_for($1, $2, $3, $4)")
-            .bind(&self.queue_name)
-            .bind(self.run_id)
-            .bind(&checkpoint_name)
-            .bind(duration_ms)
-            .fetch_one(&self.pool)
-            .await?;
+        let (needs_suspend,): (bool,) =
+            sqlx::query_as("SELECT durable.sleep_for($1, $2, $3, $4, $5)")
+                .bind(&self.queue_name)
+                .bind(self.task_id)
+                .bind(self.run_id)
+                .bind(&checkpoint_name)
+                .bind(duration_ms)
+                .fetch_one(&self.pool)
+                .await?;
 
         if needs_suspend {
             return Err(TaskError::Control(ControlFlow::Suspend));

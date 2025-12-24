@@ -334,6 +334,7 @@ declare
   v_claim_until timestamptz;
   v_sql text;
   v_expired_run record;
+  v_cancelled_task uuid;
 begin
   if v_claim_timeout <= 0 then
     raise exception 'claim_timeout must be greater than zero';
@@ -344,59 +345,82 @@ begin
   -- Apply cancellation rules before claiming.
   -- These are max_delay (delay before starting) and
   -- max_duration (duration from created to finished)
-  execute format(
-    'with limits as (
-        select task_id,
-               (cancellation->>''max_delay'')::bigint as max_delay,
-               (cancellation->>''max_duration'')::bigint as max_duration,
-               enqueue_at,
-               first_started_at,
-               state
-          from durable.%I
-        where state in (''pending'', ''sleeping'', ''running'')
-     ),
-     to_cancel as (
-        select task_id
-          from limits
-         where
-           (
-             max_delay is not null
-             and first_started_at is null
-             and extract(epoch from ($1 - enqueue_at)) >= max_delay
-           )
-           or
-           (
-             max_duration is not null
-             and first_started_at is not null
-             and extract(epoch from ($1 - first_started_at)) >= max_duration
-           )
-     )
-     update durable.%I t
-        set state = ''cancelled'',
-            cancelled_at = coalesce(t.cancelled_at, $1)
-      where t.task_id in (select task_id from to_cancel)',
-    't_' || p_queue_name,
-    't_' || p_queue_name
-  ) using v_now;
+  -- Use a loop so we can cleanup each cancelled task properly.
+  for v_cancelled_task in
+    execute format(
+      'with limits as (
+          select task_id,
+                 (cancellation->>''max_delay'')::bigint as max_delay,
+                 (cancellation->>''max_duration'')::bigint as max_duration,
+                 enqueue_at,
+                 first_started_at,
+                 state
+            from durable.%I
+          where state in (''pending'', ''sleeping'', ''running'')
+       ),
+       to_cancel as (
+          select task_id
+            from limits
+           where
+             (
+               max_delay is not null
+               and first_started_at is null
+               and extract(epoch from ($1 - enqueue_at)) >= max_delay
+             )
+             or
+             (
+               max_duration is not null
+               and first_started_at is not null
+               and extract(epoch from ($1 - first_started_at)) >= max_duration
+             )
+       )
+       update durable.%I t
+          set state = ''cancelled'',
+              cancelled_at = coalesce(t.cancelled_at, $1)
+        where t.task_id in (select task_id from to_cancel)
+        returning t.task_id',
+      't_' || p_queue_name,
+      't_' || p_queue_name
+    ) using v_now
+  loop
+    -- Cancel all runs for this task
+    execute format(
+      'update durable.%I
+          set state = ''cancelled'',
+              claimed_by = null,
+              claim_expires_at = null
+        where task_id = $1
+          and state not in (''completed'', ''failed'', ''cancelled'')',
+      'r_' || p_queue_name
+    ) using v_cancelled_task;
 
-  -- Fail any run claims that have timed out
+    -- Cleanup: delete waiters, emit event, cascade cancel children
+    perform durable.cleanup_task_terminal(p_queue_name, v_cancelled_task, 'cancelled', null, true);
+  end loop;
+
+  -- Fail any run claims that have timed out.
+  -- Lock tasks first to keep a consistent task -> run lock order.
   for v_expired_run in
     execute format(
-      'select run_id,
-              claimed_by,
-              claim_expires_at,
-              attempt
-         from durable.%I
-        where state = ''running''
-          and claim_expires_at is not null
-          and claim_expires_at <= $1
-        for update skip locked',
-      'r_' || p_queue_name
+      'select r.run_id,
+              r.task_id,
+              r.claimed_by,
+              r.claim_expires_at,
+              r.attempt
+         from durable.%I r
+         join durable.%I t on t.task_id = r.task_id
+        where r.state = ''running''
+          and r.claim_expires_at is not null
+          and r.claim_expires_at <= $1
+        for update of t skip locked',
+      'r_' || p_queue_name,
+      't_' || p_queue_name
     )
   using v_now
   loop
     perform durable.fail_run(
       p_queue_name,
+      v_expired_run.task_id,
       v_expired_run.run_id,
       jsonb_strip_nulls(jsonb_build_object(
         'name', '$ClaimTimeout',
@@ -499,6 +523,7 @@ $$;
 -- Marks a run as completed
 create function durable.complete_run (
   p_queue_name text,
+  p_task_id uuid,
   p_run_id uuid,
   p_state jsonb default null
 )
@@ -506,11 +531,27 @@ create function durable.complete_run (
   language plpgsql
 as $$
 declare
-  v_task_id uuid;
+  v_task_id_locked uuid;
+  v_run_task_id uuid;
   v_state text;
-  v_parent_task_id uuid;
   v_now timestamptz := durable.current_time();
 begin
+  -- Lock task first to keep a consistent task -> run lock order.
+  execute format(
+    'select task_id
+       from durable.%I
+      where task_id = $1
+      for update',
+    't_' || p_queue_name
+  )
+  into v_task_id_locked
+  using p_task_id;
+
+  if v_task_id_locked is null then
+    raise exception 'Task "%" not found in queue "%"', p_task_id, p_queue_name;
+  end if;
+
+  -- Lock the run after the task lock
   execute format(
     'select task_id, state
        from durable.%I
@@ -518,17 +559,22 @@ begin
       for update',
     'r_' || p_queue_name
   )
-  into v_task_id, v_state
+  into v_run_task_id, v_state
   using p_run_id;
 
-  if v_task_id is null then
+  if v_run_task_id is null then
     raise exception 'Run "%" not found in queue "%"', p_run_id, p_queue_name;
+  end if;
+
+  if v_run_task_id <> p_task_id then
+    raise exception 'Run "%" does not belong to task "%"', p_run_id, p_task_id;
   end if;
 
   if v_state <> 'running' then
     raise exception 'Run "%" is not currently running in queue "%"', p_run_id, p_queue_name;
   end if;
 
+  -- Update run to completed
   execute format(
     'update durable.%I
         set state = ''completed'',
@@ -538,38 +584,30 @@ begin
     'r_' || p_queue_name
   ) using p_run_id, v_now, p_state;
 
-  -- Get parent_task_id to check if this is a subtask
+  -- Update task to completed
   execute format(
     'update durable.%I
         set state = ''completed'',
             completed_payload = $2,
             last_attempt_run = $3
-      where task_id = $1
-      returning parent_task_id',
+      where task_id = $1',
     't_' || p_queue_name
-  )
-  into v_parent_task_id
-  using v_task_id, p_state, p_run_id;
+  ) using p_task_id, p_state, p_run_id;
 
-  -- Clean up any wait registrations for this run
-  execute format(
-    'delete from durable.%I where run_id = $1',
-    'w_' || p_queue_name
-  ) using p_run_id;
-
-  -- Emit completion event for parent to join on (only if this is a subtask)
-  if v_parent_task_id is not null then
-    perform durable.emit_event(
-      p_queue_name,
-      '$child:' || v_task_id::text,
-      jsonb_build_object('status', 'completed', 'result', p_state)
-    );
-  end if;
+  -- Cleanup: delete waiters and emit completion event for parent
+  perform durable.cleanup_task_terminal(
+    p_queue_name,
+    p_task_id,
+    'completed',
+    jsonb_build_object('result', p_state),
+    false  -- don't cascade cancel children for completed tasks
+  );
 end;
 $$;
 
 create function durable.sleep_for(
   p_queue_name text,
+  p_task_id uuid,
   p_run_id uuid,
   p_checkpoint_name text,
   p_duration_ms bigint
@@ -581,33 +619,66 @@ declare
   v_wake_at timestamptz;
   v_existing_state jsonb;
   v_now timestamptz := durable.current_time();
-  v_task_id uuid;
+  v_run_task_id uuid;
+  v_run_state text;
+  v_task_state text;
 begin
-  -- Get task_id from run (needed for checkpoint table key)
+  -- Lock task first to keep a consistent task -> run lock order.
   execute format(
-    'select task_id from durable.%I where run_id = $1 and state = ''running'' for update',
-    'r_' || p_queue_name
-  ) into v_task_id using p_run_id;
+    'select state from durable.%I where task_id = $1 for update',
+    't_' || p_queue_name
+  ) into v_task_state using p_task_id;
 
-  if v_task_id is null then
+  if v_task_state is null then
+    raise exception 'Task "%" not found in queue "%"', p_task_id, p_queue_name;
+  end if;
+
+  if v_task_state = 'cancelled' then
+    raise exception sqlstate 'AB001' using message = 'Task has been cancelled';
+  end if;
+
+  -- Lock run after task
+  execute format(
+    'select task_id, state from durable.%I where run_id = $1 for update',
+    'r_' || p_queue_name
+  ) into v_run_task_id, v_run_state using p_run_id;
+
+  if v_run_task_id is null then
+    raise exception 'Run "%" not found in queue "%"', p_run_id, p_queue_name;
+  end if;
+
+  if v_run_task_id <> p_task_id then
+    raise exception 'Run "%" does not belong to task "%"', p_run_id, p_task_id;
+  end if;
+
+  if v_run_state <> 'running' then
     raise exception 'Run "%" is not currently running in queue "%"', p_run_id, p_queue_name;
   end if;
 
-  -- Check for existing checkpoint, else compute and store wake time
+  -- Check for existing checkpoint
   execute format(
     'select state from durable.%I where task_id = $1 and checkpoint_name = $2',
     'c_' || p_queue_name
-  ) into v_existing_state using v_task_id, p_checkpoint_name;
+  ) into v_existing_state using p_task_id, p_checkpoint_name;
 
   if v_existing_state is not null then
     v_wake_at := (v_existing_state #>> '{}')::timestamptz;
   else
+    -- Compute wake time and store checkpoint (first-writer-wins)
     v_wake_at := v_now + (p_duration_ms || ' milliseconds')::interval;
     execute format(
       'insert into durable.%I (task_id, checkpoint_name, state, owner_run_id, updated_at)
-       values ($1, $2, $3, $4, $5)',
+       values ($1, $2, $3, $4, $5)
+       on conflict (task_id, checkpoint_name) do nothing',
       'c_' || p_queue_name
-    ) using v_task_id, p_checkpoint_name, to_jsonb(v_wake_at::text), p_run_id, v_now;
+    ) using p_task_id, p_checkpoint_name, to_jsonb(v_wake_at::text), p_run_id, v_now;
+
+    -- Re-read in case we lost the race (first-writer-wins)
+    execute format(
+      'select state from durable.%I where task_id = $1 and checkpoint_name = $2',
+      'c_' || p_queue_name
+    ) into v_existing_state using p_task_id, p_checkpoint_name;
+    v_wake_at := (v_existing_state #>> '{}')::timestamptz;
   end if;
 
   -- If wake time passed, return false (no suspend needed)
@@ -632,9 +703,57 @@ begin
         set state = ''sleeping''
       where task_id = $1',
     't_' || p_queue_name
-  ) using v_task_id;
+  ) using p_task_id;
 
   return true;
+end;
+$$;
+
+-- Consolidates cleanup logic for a task that has reached a terminal state.
+-- This function:
+--   1. Deletes wait registrations for the task
+--   2. Emits a completion event for the parent (if this is a subtask)
+--   3. Optionally cascades cancellation to children
+--
+-- Called by: complete_run, fail_run, cancel_task, cascade_cancel_children, claim_task
+create function durable.cleanup_task_terminal (
+  p_queue_name text,
+  p_task_id uuid,
+  p_status text,             -- 'completed', 'failed', 'cancelled'
+  p_payload jsonb default null,
+  p_cascade_children boolean default false
+)
+  returns void
+  language plpgsql
+as $$
+declare
+  v_parent_task_id uuid;
+begin
+  -- Get parent_task_id for event emission
+  execute format(
+    'select parent_task_id from durable.%I where task_id = $1',
+    't_' || p_queue_name
+  ) into v_parent_task_id using p_task_id;
+
+  -- Delete wait registrations for this task
+  execute format(
+    'delete from durable.%I where task_id = $1',
+    'w_' || p_queue_name
+  ) using p_task_id;
+
+  -- Emit completion event for parent (if subtask)
+  if v_parent_task_id is not null then
+    perform durable.emit_event(
+      p_queue_name,
+      '$child:' || p_task_id::text,
+      jsonb_build_object('status', p_status) || coalesce(p_payload, '{}'::jsonb)
+    );
+  end if;
+
+  -- Cascade cancel children if requested
+  if p_cascade_children then
+    perform durable.cascade_cancel_children(p_queue_name, p_task_id);
+  end if;
 end;
 $$;
 
@@ -649,13 +768,12 @@ create function durable.cascade_cancel_children (
 as $$
 declare
   v_child_id uuid;
-  v_child_state text;
   v_now timestamptz := durable.current_time();
 begin
   -- Find all children of this parent that are not in terminal state
-  for v_child_id, v_child_state in
+  for v_child_id in
     execute format(
-      'select task_id, state
+      'select task_id
          from durable.%I
         where parent_task_id = $1
           and state not in (''completed'', ''failed'', ''cancelled'')
@@ -684,27 +802,15 @@ begin
       'r_' || p_queue_name
     ) using v_child_id;
 
-    -- Delete wait registrations
-    execute format(
-      'delete from durable.%I where task_id = $1',
-      'w_' || p_queue_name
-    ) using v_child_id;
-
-    -- Emit cancellation event so parent's join() can receive it
-    perform durable.emit_event(
-      p_queue_name,
-      '$child:' || v_child_id::text,
-      jsonb_build_object('status', 'cancelled')
-    );
-
-    -- Recursively cancel grandchildren
-    perform durable.cascade_cancel_children(p_queue_name, v_child_id);
+    -- Cleanup: delete waiters, emit event, and recursively cascade to grandchildren
+    perform durable.cleanup_task_terminal(p_queue_name, v_child_id, 'cancelled', null, true);
   end loop;
 end;
 $$;
 
 create function durable.fail_run (
   p_queue_name text,
+  p_task_id uuid,
   p_run_id uuid,
   p_reason jsonb,
   p_retry_at timestamptz default null
@@ -713,7 +819,7 @@ create function durable.fail_run (
   language plpgsql
 as $$
 declare
-  v_task_id uuid;
+  v_run_task_id uuid;
   v_attempt integer;
   v_retry_strategy jsonb;
   v_max_attempts integer;
@@ -735,36 +841,43 @@ declare
   v_recorded_attempt integer;
   v_last_attempt_run uuid := p_run_id;
   v_cancelled_at timestamptz := null;
-  v_parent_task_id uuid;
 begin
-  -- find the run to fail
+  -- Lock task first to keep a consistent task -> run lock order.
   execute format(
-    'select r.task_id, r.attempt
-       from durable.%I r
-      where r.run_id = $1
-        and r.state in (''running'', ''sleeping'')
-      for update',
-    'r_' || p_queue_name
-  )
-  into v_task_id, v_attempt
-  using p_run_id;
-
-  if v_task_id is null then
-    raise exception 'Run "%" cannot be failed in queue "%"', p_run_id, p_queue_name;
-  end if;
-
-  -- get the retry strategy and metadata about task
-  execute format(
-    'select retry_strategy, max_attempts, first_started_at, cancellation, state, parent_task_id
+    'select retry_strategy, max_attempts, first_started_at, cancellation, state
        from durable.%I
       where task_id = $1
       for update',
     't_' || p_queue_name
   )
-  into v_retry_strategy, v_max_attempts, v_first_started, v_cancellation, v_task_state, v_parent_task_id
-  using v_task_id;
+  into v_retry_strategy, v_max_attempts, v_first_started, v_cancellation, v_task_state
+  using p_task_id;
 
-  -- actually fail the run
+  if v_task_state is null then
+    raise exception 'Task "%" not found in queue "%"', p_task_id, p_queue_name;
+  end if;
+
+  -- Lock run after task and ensure it's still eligible
+  execute format(
+    'select task_id, attempt
+       from durable.%I
+      where run_id = $1
+        and state in (''running'', ''sleeping'')
+      for update',
+    'r_' || p_queue_name
+  )
+  into v_run_task_id, v_attempt
+  using p_run_id;
+
+  if v_run_task_id is null then
+    raise exception 'Run "%" cannot be failed in queue "%"', p_run_id, p_queue_name;
+  end if;
+
+  if v_run_task_id <> p_task_id then
+    raise exception 'Run "%" does not belong to task "%"', p_run_id, p_task_id;
+  end if;
+
+  -- Actually fail the run
   execute format(
     'update durable.%I
         set state = ''failed'',
@@ -779,7 +892,7 @@ begin
   v_task_state_after := 'failed';
   v_recorded_attempt := v_attempt;
 
-  -- compute the next retry time
+  -- Compute the next retry time
   if v_max_attempts is null or v_next_attempt <= v_max_attempts then
     if p_retry_at is not null then
       v_next_available := p_retry_at;
@@ -815,7 +928,7 @@ begin
       end if;
     end if;
 
-    -- set up the new run if not cancelling
+    -- Set up the new run if not cancelling
     if not v_task_cancel then
       v_task_state_after := case when v_next_available > v_now then 'sleeping' else 'pending' end;
       v_new_run_id := durable.portable_uuidv7();
@@ -827,7 +940,7 @@ begin
         'r_' || p_queue_name,
         v_task_state_after
       )
-      using v_new_run_id, v_task_id, v_next_attempt, v_next_available;
+      using v_new_run_id, p_task_id, v_next_attempt, v_next_available;
     end if;
   end if;
 
@@ -847,26 +960,23 @@ begin
       where task_id = $1',
     't_' || p_queue_name,
     v_task_state_after
-  ) using v_task_id, v_task_state_after, v_recorded_attempt, v_last_attempt_run, v_cancelled_at;
+  ) using p_task_id, v_task_state_after, v_recorded_attempt, v_last_attempt_run, v_cancelled_at;
 
+  -- Delete wait registrations for this run
   execute format(
     'delete from durable.%I where run_id = $1',
     'w_' || p_queue_name
   ) using p_run_id;
 
-  -- If task reached terminal failure state (failed or cancelled), emit event and cascade cancel
+  -- If task reached terminal state, cleanup (emit event, cascade cancel)
   if v_task_state_after in ('failed', 'cancelled') then
-    -- Cascade cancel all children
-    perform durable.cascade_cancel_children(p_queue_name, v_task_id);
-
-    -- Emit completion event for parent to join on (only if this is a subtask)
-    if v_parent_task_id is not null then
-      perform durable.emit_event(
-        p_queue_name,
-        '$child:' || v_task_id::text,
-        jsonb_build_object('status', v_task_state_after, 'error', p_reason)
-      );
-    end if;
+    perform durable.cleanup_task_terminal(
+      p_queue_name,
+      p_task_id,
+      v_task_state_after,
+      jsonb_build_object('error', p_reason),
+      true  -- cascade cancel children
+    );
   end if;
 end;
 $$;
@@ -889,8 +999,6 @@ as $$
 declare
   v_now timestamptz := durable.current_time();
   v_new_attempt integer;
-  v_existing_attempt integer;
-  v_existing_owner uuid;
   v_task_state text;
 begin
   if p_step_name is null or length(trim(p_step_name)) = 0 then
@@ -932,29 +1040,22 @@ begin
   end if;
 
   execute format(
-    'select c.owner_run_id,
-            r.attempt
-       from durable.%I c
-       left join durable.%I r on r.run_id = c.owner_run_id
-      where c.task_id = $1
-        and c.checkpoint_name = $2',
+    'insert into durable.%I (task_id, checkpoint_name, state, owner_run_id, updated_at)
+     values ($1, $2, $3, $4, $5)
+     on conflict (task_id, checkpoint_name)
+     do update set state = excluded.state,
+                   owner_run_id = excluded.owner_run_id,
+                   updated_at = excluded.updated_at
+     where $6 >= coalesce(
+       (select r.attempt
+          from durable.%I r
+         where r.run_id = durable.%I.owner_run_id),
+       $6
+     )',
     'c_' || p_queue_name,
-    'r_' || p_queue_name
-  )
-  into v_existing_owner, v_existing_attempt
-  using p_task_id, p_step_name;
-
-  if v_existing_owner is null or v_existing_attempt is null or v_new_attempt >= v_existing_attempt then
-    execute format(
-      'insert into durable.%I (task_id, checkpoint_name, state, owner_run_id, updated_at)
-       values ($1, $2, $3, $4, $5)
-       on conflict (task_id, checkpoint_name)
-       do update set state = excluded.state,
-                     owner_run_id = excluded.owner_run_id,
-                     updated_at = excluded.updated_at',
-      'c_' || p_queue_name
-    ) using p_task_id, p_step_name, p_state, p_owner_run, v_now;
-  end if;
+    'r_' || p_queue_name,
+    'c_' || p_queue_name
+  ) using p_task_id, p_step_name, p_state, p_owner_run, v_now, v_new_attempt;
 end;
 $$;
 
@@ -1069,6 +1170,7 @@ create function durable.await_event (
 as $$
 declare
   v_run_state text;
+  v_run_task_id uuid;
   v_existing_payload jsonb;
   v_event_payload jsonb;
   v_checkpoint_payload jsonb;
@@ -1130,25 +1232,39 @@ begin
     'e_' || p_queue_name
   ) using p_event_name;
 
-  -- let's get the run state, any existing event payload and wake event name
+  -- Lock task first to keep a consistent task -> run lock order.
   execute format(
-    'select r.state, r.event_payload, r.wake_event, t.state
-       from durable.%I r
-       join durable.%I t on t.task_id = r.task_id
-      where r.run_id = $1
-      for update',
-    'r_' || p_queue_name,
+    'select state from durable.%I where task_id = $1 for update',
     't_' || p_queue_name
   )
-  into v_run_state, v_existing_payload, v_wake_event, v_task_state
+  into v_task_state
+  using p_task_id;
+
+  if v_task_state is null then
+    raise exception 'Task "%" not found in queue "%"', p_task_id, p_queue_name;
+  end if;
+
+  if v_task_state = 'cancelled' then
+    raise exception sqlstate 'AB001' using message = 'Task has been cancelled';
+  end if;
+
+  -- Lock run after task
+  execute format(
+    'select task_id, state, event_payload, wake_event
+       from durable.%I
+      where run_id = $1
+      for update',
+    'r_' || p_queue_name
+  )
+  into v_run_task_id, v_run_state, v_existing_payload, v_wake_event
   using p_run_id;
 
   if v_run_state is null then
     raise exception 'Run "%" not found while awaiting event', p_run_id;
   end if;
 
-  if v_task_state = 'cancelled' then
-    raise exception sqlstate 'AB001' using message = 'Task has been cancelled';
+  if v_run_task_id <> p_task_id then
+    raise exception 'Run "%" does not belong to task "%"', p_run_id, p_task_id;
   end if;
 
   execute format(
@@ -1255,6 +1371,7 @@ as $$
 declare
   v_now timestamptz := durable.current_time();
   v_payload jsonb := coalesce(p_payload, 'null'::jsonb);
+  v_inserted_count integer;
 begin
   if p_event_name is null or length(trim(p_event_name)) = 0 then
     raise exception 'event_name must be provided';
@@ -1274,6 +1391,14 @@ begin
     'e_' || p_queue_name
   ) using p_event_name, v_payload, v_now;
 
+  get diagnostics v_inserted_count = row_count;
+
+  -- Only wake waiters if we actually inserted (first emit).
+  -- Subsequent emits are no-ops to maintain consistency.
+  if v_inserted_count = 0 then
+    return;
+  end if;
+
   execute format(
     'with expired_waits as (
         delete from durable.%1$I w
@@ -1288,6 +1413,17 @@ begin
          where event_name = $1
            and (timeout_at is null or timeout_at > $2)
      ),
+     -- Lock tasks before updating runs to prevent waking cancelled tasks.
+     -- Only lock sleeping tasks to avoid interfering with other operations.
+     -- This prevents waking cancelled tasks (e.g., when cascade_cancel_children
+     -- is running concurrently).
+     locked_tasks as (
+        select t.task_id
+          from durable.%4$I t
+         where t.task_id in (select task_id from affected)
+           and t.state = ''sleeping''
+         for update
+     ),
      -- update the run table for all waiting runs so they are pending again
      updated_runs as (
         update durable.%2$I r
@@ -1299,6 +1435,7 @@ begin
                claim_expires_at = null
          where r.run_id in (select run_id from affected)
            and r.state = ''sleeping''
+           and r.task_id in (select task_id from locked_tasks)
          returning r.run_id, r.task_id
      ),
      -- update checkpoints for all affected tasks/steps so they contain the event payload
@@ -1345,16 +1482,15 @@ as $$
 declare
   v_now timestamptz := durable.current_time();
   v_task_state text;
-  v_parent_task_id uuid;
 begin
   execute format(
-    'select state, parent_task_id
+    'select state
        from durable.%I
       where task_id = $1
       for update',
     't_' || p_queue_name
   )
-  into v_task_state, v_parent_task_id
+  into v_task_state
   using p_task_id;
 
   if v_task_state is null then
@@ -1383,22 +1519,8 @@ begin
     'r_' || p_queue_name
   ) using p_task_id;
 
-  execute format(
-    'delete from durable.%I where task_id = $1',
-    'w_' || p_queue_name
-  ) using p_task_id;
-
-  -- Cascade cancel all children
-  perform durable.cascade_cancel_children(p_queue_name, p_task_id);
-
-  -- Emit cancellation event for parent to join on (only if this is a subtask)
-  if v_parent_task_id is not null then
-    perform durable.emit_event(
-      p_queue_name,
-      '$child:' || p_task_id::text,
-      jsonb_build_object('status', 'cancelled')
-    );
-  end if;
+  -- Cleanup: delete waiters, emit event, cascade cancel children
+  perform durable.cleanup_task_terminal(p_queue_name, p_task_id, 'cancelled', null, true);
 end;
 $$;
 
