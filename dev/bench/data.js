@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1766606580645,
+  "lastUpdate": 1766606937785,
   "repoUrl": "https://github.com/tensorzero/durable",
   "entries": {
     "Criterion Benchmark": [
@@ -599,6 +599,156 @@ window.BENCHMARK_DATA = {
             "name": "e2e_completion/single_task_roundtrip",
             "value": 14780129,
             "range": "± 537872",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "virajmehta@users.noreply.github.com",
+            "name": "Viraj Mehta",
+            "username": "virajmehta"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": false,
+          "id": "d564532eb8e46d74db028013e8d3e4dcb0d41d6d",
+          "message": "fix: lock ordering & cleanup (also contains atomic checkpoints) (#38)\n\n* fix: prevent lost wakeups in event await/emit race condition\n\n   Add advisory locks to serialize concurrent await_event and emit_event\n   operations on the same event. This prevents a race condition where:\n\n   1. Task A checks if event exists (not yet)\n   2. Task B emits the event and wakes waiters (none yet)\n   3. Task A registers as a waiter (missed the wake)\n\n   The lock_event() function uses pg_advisory_xact_lock with hashed\n   queue_name and event_name to ensure atomicity.\n\n   Also changes emit_event to first-writer-wins semantics (ON CONFLICT\n   DO NOTHING) to maintain consistency - subsequent emits for the same\n   event are no-ops.\n\n   Tests:\n   - test_event_functions_use_advisory_locks: Verifies both functions call lock_event\n   - test_event_race_stress: Stress test with 128 concurrent tasks x 4 rounds\n   - test_event_first_writer_wins: Renamed from test_event_last_write_wins\n\n* Lock Ordering + Cleanup Consolidation\n\n  Problem\n\n  1. Deadlock risk: Functions that touch both tasks and runs could deadlock if they acquired locks in inconsistent order\n  2. Scattered cleanup logic: Terminal task cleanup (deleting waiters, emitting parent events, cascading cancellation) was duplicated across multiple functions\n  3. Incomplete cascade cancellation: Auto-cancelled tasks (via max_duration) didn't cascade cancel their children\n\n  Solution\n\n  Lock Ordering: All functions now acquire locks in consistent order (task first, then run):\n  - complete_run, fail_run, sleep_for, await_event: lock task FOR UPDATE before locking run\n  - claim_task: lock task before run when handling expired claims\n  - emit_event: lock sleeping tasks before waking runs (via locked_tasks CTE)\n\n  Cleanup Consolidation: New cleanup_task_terminal() function handles:\n  - Deleting wait registrations for the task\n  - Emitting completion event for parent ($child:<task_id>)\n  - Optionally cascading cancellation to children\n\n  Used by: complete_run, fail_run, cancel_task, cascade_cancel_children, claim_task\n\n  Other improvements:\n  - emit_event early return when event already exists (optimization)\n  - sleep_for now takes task_id parameter for proper lock ordering\n\n  Tests\n\n  - New lock_order_test.rs with 6 tests verifying lock ordering works correctly\n  - New test_cascade_cancel_when_parent_auto_cancelled_by_max_duration in fanout_test.rs\n  - New test helpers: single_conn_pool(), RunInfo, get_runs_for_task()\n\n* pass task ID to more endpoints so they can lock in order efficiently\n\n* make checkpoint writing atomically check the version\n\n* added test that covers lock order case for events / claim task\n\n* fmtted\n\n* fixed fmt\n\n---------\n\nCo-authored-by: Gabriel Bianconi <1275491+GabrielBianconi@users.noreply.github.com>",
+          "timestamp": "2025-12-24T19:32:59Z",
+          "tree_id": "8654241134d91191976b7b11a1fb7304304af5ce",
+          "url": "https://github.com/tensorzero/durable/commit/d564532eb8e46d74db028013e8d3e4dcb0d41d6d"
+        },
+        "date": 1766606937339,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "step_cache_miss/steps/10",
+            "value": 43619651,
+            "range": "± 5305992",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/50",
+            "value": 80189248,
+            "range": "± 479528",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/100",
+            "value": 135048259,
+            "range": "± 3013668",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/10",
+            "value": 11995063,
+            "range": "± 448811",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/50",
+            "value": 14270909,
+            "range": "± 1762481",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/100",
+            "value": 13080880,
+            "range": "± 976816",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1",
+            "value": 29834613,
+            "range": "± 864038",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/100",
+            "value": 24148052,
+            "range": "± 107861",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1000",
+            "value": 71193119,
+            "range": "± 5417028",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/2",
+            "value": 642205183,
+            "range": "± 11346326",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/4",
+            "value": 408487139,
+            "range": "± 7623305",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/8",
+            "value": 368573483,
+            "range": "± 4525308",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/16",
+            "value": 384008193,
+            "range": "± 9361740",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/baseline",
+            "value": 156979789,
+            "range": "± 6985531",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/contention",
+            "value": 115561127,
+            "range": "± 7034385",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "spawn_latency/single_spawn",
+            "value": 850049,
+            "range": "± 421082",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/1",
+            "value": 561347159,
+            "range": "± 8155801",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/2",
+            "value": 350899357,
+            "range": "± 2779874",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/4",
+            "value": 249181617,
+            "range": "± 2137879",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/8",
+            "value": 192743770,
+            "range": "± 1761295",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "e2e_completion/single_task_roundtrip",
+            "value": 15671491,
+            "range": "± 325488",
             "unit": "ns/iter"
           }
         ]
