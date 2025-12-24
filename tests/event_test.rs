@@ -1153,8 +1153,8 @@ async fn test_await_event_late_joiner_sees_payload(pool: PgPool) -> sqlx::Result
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
         .await;
@@ -1197,7 +1197,7 @@ async fn test_await_event_late_joiner_sees_payload(pool: PgPool) -> sqlx::Result
     let terminal_b =
         wait_for_task_terminal(&pool, "late_join", task_b.task_id, Duration::from_secs(3)).await?;
 
-    worker.shutdown().await;
+    worker.expect("Failed to start worker").shutdown().await;
 
     assert_eq!(
         terminal_b,
