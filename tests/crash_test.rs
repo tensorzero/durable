@@ -42,7 +42,9 @@ async fn test_crash_mid_step_resumes_from_checkpoint(pool: PgPool) -> sqlx::Resu
                 fail_after_step2: true,
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(3),
                 ..Default::default()
             },
@@ -54,11 +56,12 @@ async fn test_crash_mid_step_resumes_from_checkpoint(pool: PgPool) -> sqlx::Resu
     {
         let worker = client
             .start_worker(WorkerOptions {
-                poll_interval: 0.05,
-                claim_timeout: 30,
+                poll_interval: Duration::from_millis(50),
+                claim_timeout: Duration::from_secs(30),
                 ..Default::default()
             })
-            .await;
+            .await
+            .unwrap();
 
         // Wait for some progress
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -77,11 +80,12 @@ async fn test_crash_mid_step_resumes_from_checkpoint(pool: PgPool) -> sqlx::Resu
     // Second worker picks up the task
     let worker2 = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 5, // Short timeout to reclaim quickly
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(5), // Short timeout to reclaim quickly
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to reach terminal state
     let terminal = wait_for_task_terminal(
@@ -113,7 +117,7 @@ async fn test_worker_drop_without_shutdown(pool: PgPool) -> sqlx::Result<()> {
     client.create_queue(None).await.unwrap();
     client.register::<SlowNoHeartbeatTask>().await.unwrap();
 
-    let claim_timeout = 2; // 2 second lease
+    let claim_timeout = Duration::from_secs(2); // 2 second lease
 
     // Spawn a slow task that will outlive the lease
     let spawn_result = client
@@ -127,11 +131,12 @@ async fn test_worker_drop_without_shutdown(pool: PgPool) -> sqlx::Result<()> {
     {
         let worker = client
             .start_worker(WorkerOptions {
-                poll_interval: 0.05,
+                poll_interval: Duration::from_millis(50),
                 claim_timeout,
                 ..Default::default()
             })
-            .await;
+            .await
+            .unwrap();
 
         // Wait for task to start
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -145,16 +150,17 @@ async fn test_worker_drop_without_shutdown(pool: PgPool) -> sqlx::Result<()> {
     }
 
     // Wait for real time to pass the lease timeout
-    tokio::time::sleep(Duration::from_secs(claim_timeout + 1)).await;
+    tokio::time::sleep(claim_timeout + Duration::from_secs(1)).await;
 
     // Second worker should reclaim the task
     let worker2 = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 60, // Longer timeout for second worker
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(60), // Longer timeout for second worker
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Give time for reclaim and some progress
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -184,7 +190,7 @@ async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
 
-    let claim_timeout = 2; // 2 second lease
+    let claim_timeout = Duration::from_secs(2); // 2 second lease
 
     // Spawn a long-running task that heartbeats (but we'll let the lease expire)
     let spawn_result = client
@@ -198,11 +204,12 @@ async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> 
     // First worker claims the task
     let worker1 = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
+            poll_interval: Duration::from_millis(50),
             claim_timeout,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to start
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -214,16 +221,17 @@ async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> 
     worker1.shutdown().await;
 
     // Advance time past the lease timeout
-    advance_time(&pool, claim_timeout as i64 + 1).await?;
+    advance_time(&pool, claim_timeout.as_secs() as i64 + 1).await?;
 
     // Second worker should be able to reclaim
     let worker2 = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 60, // Longer timeout this time
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(60), // Longer timeout this time
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Give second worker time to reclaim
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -248,7 +256,7 @@ async fn test_heartbeat_prevents_lease_expiration(pool: PgPool) -> sqlx::Result<
     client.create_queue(None).await.unwrap();
     client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
-    let claim_timeout = 2; // 2 second lease
+    let claim_timeout = Duration::from_secs(2); // 2 second lease
 
     // Spawn a task that runs for 5 seconds with frequent heartbeats
     let spawn_result = client
@@ -261,11 +269,12 @@ async fn test_heartbeat_prevents_lease_expiration(pool: PgPool) -> sqlx::Result<
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
+            poll_interval: Duration::from_millis(50),
             claim_timeout,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to complete
     let terminal = wait_for_task_terminal(
@@ -309,12 +318,13 @@ async fn test_spawn_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 2, // Handle parent and child
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for parent to complete
     let terminal = wait_for_task_terminal(
@@ -372,7 +382,9 @@ async fn test_step_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
                 fail_after_step2: false, // Don't fail, just complete
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(2),
                 ..Default::default()
             },
@@ -382,11 +394,12 @@ async fn test_step_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -428,7 +441,7 @@ async fn test_cpu_bound_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
 
-    let claim_timeout = 2; // 2 second lease
+    let claim_timeout = Duration::from_secs(2); // 2 second lease
 
     // Spawn a CPU-bound task that runs for 10 seconds (way longer than lease)
     let spawn_result = client
@@ -437,7 +450,9 @@ async fn test_cpu_bound_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
                 duration_ms: 10000, // 10 seconds
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(3),
                 ..Default::default()
             },
@@ -447,17 +462,18 @@ async fn test_cpu_bound_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
+            poll_interval: Duration::from_millis(50),
             claim_timeout,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to be claimed and start
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Advance time past the lease timeout
-    advance_time(&pool, claim_timeout as i64 + 1).await?;
+    advance_time(&pool, claim_timeout.as_secs() as i64 + 1).await?;
 
     // Give time for reclaim to happen
     tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -485,7 +501,7 @@ async fn test_slow_task_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
     client.create_queue(None).await.unwrap();
     client.register::<SlowNoHeartbeatTask>().await.unwrap();
 
-    let claim_timeout = 2; // 2 second lease
+    let claim_timeout = Duration::from_secs(2); // 2 second lease
 
     // Spawn a slow task that sleeps for 30 seconds without heartbeat
     let spawn_result = client
@@ -494,7 +510,9 @@ async fn test_slow_task_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
                 sleep_ms: 30000, // 30 seconds - much longer than lease
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(5),
                 ..Default::default()
             },
@@ -504,11 +522,12 @@ async fn test_slow_task_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
+            poll_interval: Duration::from_millis(50),
             claim_timeout,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to be claimed and start sleeping
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -517,7 +536,7 @@ async fn test_slow_task_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
     assert_eq!(state, Some("running".to_string()));
 
     // Wait for real time to pass the lease timeout
-    tokio::time::sleep(Duration::from_secs(claim_timeout + 2)).await;
+    tokio::time::sleep(claim_timeout + Duration::from_secs(2)).await;
 
     // Verify a new run was created (reclaim happened)
     let run_count = count_runs_for_task(&pool, "crash_slow", spawn_result.task_id).await?;

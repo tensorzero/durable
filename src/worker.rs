@@ -123,7 +123,7 @@ impl Worker {
         let concurrency = options.concurrency;
         let batch_size = options.batch_size.unwrap_or(concurrency);
         let claim_timeout = options.claim_timeout;
-        let poll_interval = std::time::Duration::from_secs_f64(options.poll_interval);
+        let poll_interval = options.poll_interval;
         let fatal_on_lease_timeout = options.fatal_on_lease_timeout;
 
         // Mark worker as active
@@ -223,7 +223,7 @@ impl Worker {
         pool: &PgPool,
         queue_name: &str,
         worker_id: &str,
-        claim_timeout: u64,
+        claim_timeout: Duration,
         count: usize,
     ) -> anyhow::Result<Vec<ClaimedTask>> {
         #[cfg(feature = "telemetry")]
@@ -236,7 +236,7 @@ impl Worker {
         let rows: Vec<ClaimedTaskRow> = sqlx::query_as(query)
             .bind(queue_name)
             .bind(worker_id)
-            .bind(claim_timeout as i32)
+            .bind(claim_timeout.as_secs() as i32)
             .bind(count as i32)
             .fetch_all(pool)
             .await?;
@@ -263,7 +263,7 @@ impl Worker {
         queue_name: String,
         registry: Arc<RwLock<TaskRegistry<State>>>,
         task: ClaimedTask,
-        claim_timeout: u64,
+        claim_timeout: Duration,
         fatal_on_lease_timeout: bool,
         state: State,
     ) where
@@ -305,7 +305,7 @@ impl Worker {
         queue_name: String,
         registry: Arc<RwLock<TaskRegistry<State>>>,
         task: ClaimedTask,
-        claim_timeout: u64,
+        claim_timeout: Duration,
         fatal_on_lease_timeout: bool,
         state: State,
     ) where
@@ -377,7 +377,7 @@ impl Worker {
         let timer_handle = tokio::spawn({
             let task_label = task_label.clone();
             async move {
-                let mut warn_duration = Duration::from_secs(claim_timeout);
+                let mut warn_duration = claim_timeout;
                 let mut fatal_duration = warn_duration * 2;
                 let mut warn_fired = false;
                 let mut deadline = Instant::now();
@@ -414,7 +414,7 @@ impl Worker {
                             tracing::warn!(
                                 "Task {} exceeded claim timeout of {}s (no heartbeat/step since last extension)",
                                 task_label,
-                                claim_timeout
+                                claim_timeout.as_secs()
                             );
                             warn_fired = true;
                         }
@@ -449,7 +449,7 @@ impl Worker {
                         task_id = %task_id,
                         run_id = %run_id,
                         elapsed_secs = elapsed.as_secs(),
-                        claim_timeout_secs = claim_timeout,
+                        claim_timeout_secs = claim_timeout.as_secs(),
                         "Task {} exceeded 2x claim timeout without heartbeat; terminating process",
                         task_label
                     );
@@ -459,7 +459,7 @@ impl Worker {
                         task_id = %task_id,
                         run_id = %run_id,
                         elapsed_secs = elapsed.as_secs(),
-                        claim_timeout_secs = claim_timeout,
+                        claim_timeout_secs = claim_timeout.as_secs(),
                         "Task {} exceeded 2x claim timeout without heartbeat; aborting task",
                         task_label
                     );

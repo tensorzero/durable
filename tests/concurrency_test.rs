@@ -57,12 +57,13 @@ async fn test_task_claimed_by_exactly_one_worker(pool: PgPool) -> sqlx::Result<(
 
             let worker = client
                 .start_worker(WorkerOptions {
-                    poll_interval: 0.01, // Fast polling
-                    claim_timeout: 30,
+                    poll_interval: Duration::from_millis(10), // Fast polling
+                    claim_timeout: Duration::from_secs(30),
                     concurrency: 1,
                     ..Default::default()
                 })
-                .await;
+                .await
+                .unwrap();
 
             // Let workers run for a bit
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -156,12 +157,13 @@ async fn test_concurrent_claims_with_skip_locked(pool: PgPool) -> sqlx::Result<(
 
             let worker = client
                 .start_worker(WorkerOptions {
-                    poll_interval: 0.01, // Fast polling to maximize contention
-                    claim_timeout: 30,
+                    poll_interval: Duration::from_millis(10), // Fast polling to maximize contention
+                    claim_timeout: Duration::from_secs(30),
                     concurrency: 5, // Each worker handles multiple tasks
                     ..Default::default()
                 })
-                .await;
+                .await
+                .unwrap();
 
             // Let workers process tasks
             tokio::time::sleep(Duration::from_secs(3)).await;

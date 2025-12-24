@@ -4,6 +4,7 @@ use sqlx::{Executor, PgPool, Postgres};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -36,12 +37,12 @@ struct CancellationPolicyDb {
 
 impl CancellationPolicyDb {
     fn from_policy(policy: &CancellationPolicy) -> Option<Self> {
-        if policy.max_delay.is_none() && policy.max_duration.is_none() {
+        if policy.max_pending_time.is_none() && policy.max_running_time.is_none() {
             None
         } else {
             Some(Self {
-                max_delay: policy.max_delay,
-                max_duration: policy.max_duration,
+                max_delay: policy.max_pending_time.map(|d| d.as_secs()),
+                max_duration: policy.max_running_time.map(|d| d.as_secs()),
             })
         }
     }
@@ -599,15 +600,25 @@ where
     }
 
     /// Start a worker that processes tasks from the queue
-    pub async fn start_worker(&self, options: WorkerOptions) -> Worker {
-        Worker::start(
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DurableError::InvalidConfiguration`] if `claim_timeout` is less than 1 second.
+    pub async fn start_worker(&self, options: WorkerOptions) -> DurableResult<Worker> {
+        if options.claim_timeout < Duration::from_secs(1) {
+            return Err(DurableError::InvalidConfiguration {
+                reason: "claim_timeout must be at least 1 second".to_string(),
+            });
+        }
+
+        Ok(Worker::start(
             self.pool.clone(),
             self.queue_name.clone(),
             self.registry.clone(),
             options,
             self.state.clone(),
         )
-        .await
+        .await)
     }
 
     /// Close the client. Closes the pool if owned.
