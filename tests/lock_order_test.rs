@@ -421,12 +421,11 @@ async fn test_claim_task_skips_locked_tasks_no_deadlock(pool: PgPool) -> sqlx::R
     // Wait until the lock is confirmed held by checking pg_stat_activity
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT state FROM pg_stat_activity WHERE application_name = $1",
-        )
-        .bind("durable-task-locker")
-        .fetch_optional(&pool)
-        .await?;
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT state FROM pg_stat_activity WHERE application_name = $1")
+                .bind("durable-task-locker")
+                .fetch_optional(&pool)
+                .await?;
 
         if let Some((ref state,)) = row
             && state == "idle in transaction"
