@@ -6,6 +6,7 @@ use common::tasks::{EchoParams, EchoTask, FailingParams, FailingTask};
 use durable::{CancellationPolicy, Durable, MIGRATOR, RetryStrategy, SpawnOptions};
 use sqlx::PgPool;
 use std::collections::HashMap;
+use std::time::Duration;
 
 /// Helper to create a Durable client from the test pool.
 async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
@@ -135,7 +136,9 @@ async fn test_spawn_with_retry_strategy_fixed(pool: PgPool) -> sqlx::Result<()> 
     client.register::<EchoTask>().await.unwrap();
 
     let options = SpawnOptions {
-        retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 10 }),
+        retry_strategy: Some(RetryStrategy::Fixed {
+            base_delay: Duration::from_secs(10),
+        }),
         ..Default::default()
     };
 
@@ -162,9 +165,9 @@ async fn test_spawn_with_retry_strategy_exponential(pool: PgPool) -> sqlx::Resul
 
     let options = SpawnOptions {
         retry_strategy: Some(RetryStrategy::Exponential {
-            base_seconds: 5,
+            base_delay: Duration::from_secs(5),
             factor: 2.0,
-            max_seconds: 300,
+            max_backoff: Duration::from_secs(300),
         }),
         ..Default::default()
     };
@@ -222,8 +225,8 @@ async fn test_spawn_with_cancellation_policy(pool: PgPool) -> sqlx::Result<()> {
 
     let options = SpawnOptions {
         cancellation: Some(CancellationPolicy {
-            max_delay: Some(60),
-            max_duration: Some(300),
+            max_pending_time: Some(Duration::from_secs(60)),
+            max_running_time: Some(Duration::from_secs(300)),
         }),
         ..Default::default()
     };
@@ -279,7 +282,9 @@ async fn test_spawn_by_name_with_options(pool: PgPool) -> sqlx::Result<()> {
 
     let options = SpawnOptions {
         max_attempts: Some(3),
-        retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 5 }),
+        retry_strategy: Some(RetryStrategy::Fixed {
+            base_delay: Duration::from_secs(5),
+        }),
         ..Default::default()
     };
 

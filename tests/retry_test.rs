@@ -45,11 +45,12 @@ async fn test_retry_strategy_none_no_retry(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -87,7 +88,9 @@ async fn test_retry_strategy_fixed_delay(pool: PgPool) -> sqlx::Result<()> {
                 error_message: "intentional failure".to_string(),
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 5 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(5),
+                }),
                 max_attempts: Some(2),
                 ..Default::default()
             },
@@ -97,11 +100,12 @@ async fn test_retry_strategy_fixed_delay(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for first attempt to fail
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -164,9 +168,9 @@ async fn test_retry_strategy_exponential_backoff(pool: PgPool) -> sqlx::Result<(
             },
             SpawnOptions {
                 retry_strategy: Some(RetryStrategy::Exponential {
-                    base_seconds: 2,
+                    base_delay: Duration::from_secs(2),
                     factor: 2.0,
-                    max_seconds: 100,
+                    max_backoff: Duration::from_secs(100),
                 }),
                 max_attempts: Some(3),
                 ..Default::default()
@@ -177,11 +181,12 @@ async fn test_retry_strategy_exponential_backoff(pool: PgPool) -> sqlx::Result<(
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for first attempt to fail
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -245,7 +250,9 @@ async fn test_max_attempts_honored(pool: PgPool) -> sqlx::Result<()> {
                 error_message: "intentional failure".to_string(),
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(3),
                 ..Default::default()
             },
@@ -255,11 +262,12 @@ async fn test_max_attempts_honored(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for all attempts to complete
     let terminal = wait_for_task_terminal(

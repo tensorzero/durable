@@ -72,8 +72,12 @@ fn bench_task_throughput(c: &mut Criterion) {
                             let start = std::time::Instant::now();
                             let worker = ctx
                                 .client
-                                .start_worker(bench_worker_options(concurrency, 60))
-                                .await;
+                                .start_worker(bench_worker_options(
+                                    concurrency,
+                                    Duration::from_secs(60),
+                                ))
+                                .await
+                                .unwrap();
 
                             wait_for_tasks_complete(
                                 &ctx.pool,
@@ -112,7 +116,11 @@ fn bench_e2e_completion(c: &mut Criterion) {
                 let ctx = BenchContext::new().await;
                 ctx.client.register::<NoOpTask>().await.unwrap();
 
-                let worker = ctx.client.start_worker(bench_worker_options(1, 60)).await;
+                let worker = ctx
+                    .client
+                    .start_worker(bench_worker_options(1, Duration::from_secs(60)))
+                    .await
+                    .unwrap();
 
                 let start = std::time::Instant::now();
                 for i in 0..iters {
