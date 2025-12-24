@@ -1163,14 +1163,13 @@ async fn test_await_event_late_joiner_sees_payload(pool: PgPool) -> sqlx::Result
         .expect("Failed to emit event");
 
     // Wait for Task A to complete
-    let terminal_a = wait_for_task_terminal(
-        &pool,
-        "late_join",
-        task_a.task_id,
-        Duration::from_secs(5),
-    )
-    .await?;
-    assert_eq!(terminal_a, Some("completed".to_string()), "Task A should complete");
+    let terminal_a =
+        wait_for_task_terminal(&pool, "late_join", task_a.task_id, Duration::from_secs(5)).await?;
+    assert_eq!(
+        terminal_a,
+        Some("completed".to_string()),
+        "Task A should complete"
+    );
 
     // Now spawn Task B - it should see the event was already emitted and complete immediately
     let task_b = client
@@ -1182,13 +1181,8 @@ async fn test_await_event_late_joiner_sees_payload(pool: PgPool) -> sqlx::Result
         .expect("Failed to spawn task B");
 
     // Task B should complete quickly since event already exists with payload
-    let terminal_b = wait_for_task_terminal(
-        &pool,
-        "late_join",
-        task_b.task_id,
-        Duration::from_secs(3),
-    )
-    .await?;
+    let terminal_b =
+        wait_for_task_terminal(&pool, "late_join", task_b.task_id, Duration::from_secs(3)).await?;
 
     worker.shutdown().await;
 
@@ -1207,7 +1201,10 @@ async fn test_await_event_late_joiner_sees_payload(pool: PgPool) -> sqlx::Result
         .fetch_one(&pool)
         .await?;
 
-    assert_eq!(result.0, payload, "Task B should receive the emitted payload");
+    assert_eq!(
+        result.0, payload,
+        "Task B should receive the emitted payload"
+    );
 
     Ok(())
 }
