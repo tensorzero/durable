@@ -42,7 +42,9 @@ async fn test_checkpoint_prevents_step_reexecution(pool: PgPool) -> sqlx::Result
                 fail_after_step2: true,
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(2),
                 ..Default::default()
             },
@@ -53,11 +55,12 @@ async fn test_checkpoint_prevents_step_reexecution(pool: PgPool) -> sqlx::Result
     // Start worker
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to fail (will hit max attempts since fail_after_step2 is always true)
     let terminal = wait_for_task_terminal(
@@ -94,11 +97,12 @@ async fn test_checkpoint_prevents_step_reexecution(pool: PgPool) -> sqlx::Result
 
     let worker2 = client2
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     let terminal2 = wait_for_task_terminal(
         &pool,
@@ -138,7 +142,9 @@ async fn test_deterministic_rand_preserved_on_retry(pool: PgPool) -> sqlx::Resul
                 fail_on_first_attempt: true,
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(2),
                 ..Default::default()
             },
@@ -148,11 +154,12 @@ async fn test_deterministic_rand_preserved_on_retry(pool: PgPool) -> sqlx::Resul
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -199,7 +206,9 @@ async fn test_deterministic_now_preserved_on_retry(pool: PgPool) -> sqlx::Result
                 fail_on_first_attempt: true,
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(2),
                 ..Default::default()
             },
@@ -209,11 +218,12 @@ async fn test_deterministic_now_preserved_on_retry(pool: PgPool) -> sqlx::Result
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -257,7 +267,9 @@ async fn test_deterministic_uuid7_preserved_on_retry(pool: PgPool) -> sqlx::Resu
                 fail_on_first_attempt: true,
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(2),
                 ..Default::default()
             },
@@ -267,11 +279,12 @@ async fn test_deterministic_uuid7_preserved_on_retry(pool: PgPool) -> sqlx::Resu
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -316,11 +329,12 @@ async fn test_long_workflow_many_steps(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 60,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(60),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -368,11 +382,12 @@ async fn test_large_payload_checkpoint(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 60,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(60),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,

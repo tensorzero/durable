@@ -104,12 +104,13 @@ async fn test_spawn_single_child_and_join(pool: PgPool) -> sqlx::Result<()> {
     // Start worker with concurrency to handle both parent and child
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 2,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for tasks to complete
     tokio::time::sleep(Duration::from_millis(2000)).await;
@@ -152,12 +153,13 @@ async fn test_spawn_multiple_children_and_join(pool: PgPool) -> sqlx::Result<()>
     // Start worker with high concurrency
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 10,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for tasks to complete
     tokio::time::sleep(Duration::from_millis(3000)).await;
@@ -202,12 +204,13 @@ async fn test_child_has_parent_task_id(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 2,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     tokio::time::sleep(Duration::from_millis(2000)).await;
     worker.shutdown().await;
@@ -265,12 +268,13 @@ async fn test_child_failure_propagates_to_parent(pool: PgPool) -> sqlx::Result<(
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 4,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for tasks to complete - longer since child needs to fail first, then parent
     tokio::time::sleep(Duration::from_millis(5000)).await;
@@ -305,12 +309,13 @@ async fn test_cascade_cancel_when_parent_cancelled(pool: PgPool) -> sqlx::Result
     // Start worker to let parent spawn child
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 2, // Process both parent and child
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Give time for parent to spawn child and child to start
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -379,8 +384,8 @@ async fn test_cascade_cancel_when_parent_auto_cancelled_by_max_duration(
             },
             SpawnOptions {
                 cancellation: Some(CancellationPolicy {
-                    max_delay: None,
-                    max_duration: Some(2), // 2 seconds max duration
+                    max_pending_time: None,
+                    max_running_time: Some(Duration::from_secs(2)), // 2 seconds max duration
                 }),
                 ..Default::default()
             },
@@ -391,12 +396,13 @@ async fn test_cascade_cancel_when_parent_auto_cancelled_by_max_duration(
     // Start worker
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 2,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for parent to spawn child
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -463,12 +469,13 @@ async fn test_spawn_by_name_from_task_context(pool: PgPool) -> sqlx::Result<()> 
     // Start worker with concurrency to handle both parent and child
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 2,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for tasks to complete
     tokio::time::sleep(Duration::from_millis(2000)).await;
@@ -524,12 +531,13 @@ async fn test_join_cancelled_child_returns_child_cancelled_error(pool: PgPool) -
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 2, // Need concurrency for both parent and child
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for child to be spawned and start
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -612,12 +620,13 @@ async fn test_child_failed_error_contains_message(pool: PgPool) -> sqlx::Result<
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 4,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for parent to fail
     let terminal = wait_for_task_terminal(
@@ -692,12 +701,13 @@ async fn test_join_timeout_when_parent_claim_expires(pool: PgPool) -> sqlx::Resu
     // When the claim expires while suspended, the task should eventually timeout
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 2, // Very short - 2 seconds
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(2), // Very short - 2 seconds
             concurrency: 2,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for parent to fail (should timeout when claim expires)
     let terminal = wait_for_task_terminal(

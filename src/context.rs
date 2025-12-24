@@ -56,7 +56,7 @@ where
     queue_name: String,
     #[allow(dead_code)]
     task: ClaimedTask,
-    claim_timeout: u64,
+    claim_timeout: Duration,
 
     state: State,
 
@@ -94,7 +94,7 @@ where
         pool: PgPool,
         queue_name: String,
         task: ClaimedTask,
-        claim_timeout: u64,
+        claim_timeout: Duration,
         lease_extender: LeaseExtender,
         registry: Arc<RwLock<TaskRegistry<State>>>,
         state: State,
@@ -274,15 +274,14 @@ where
             .bind(name)
             .bind(&state_json)
             .bind(self.run_id)
-            .bind(self.claim_timeout as i32)
+            .bind(self.claim_timeout.as_secs() as i32)
             .execute(&self.pool)
             .await?;
 
         self.checkpoint_cache.insert(name.to_string(), state_json);
 
         // Notify worker that lease was extended so it can reset timers
-        self.lease_extender
-            .notify(Duration::from_secs(self.claim_timeout));
+        self.lease_extender.notify(self.claim_timeout);
 
         Ok(())
     }
@@ -445,9 +444,11 @@ where
     ///
     /// # Arguments
     /// * `duration` - Extension duration. Defaults to original claim_timeout.
+    ///   Must be at least 1 second.
     ///
     /// # Errors
-    /// Returns `TaskError::Control(Cancelled)` if the task was cancelled.
+    /// - Returns `TaskError::Validation` if duration is less than 1 second.
+    /// - Returns `TaskError::Control(Cancelled)` if the task was cancelled.
     #[cfg_attr(
         feature = "telemetry",
         tracing::instrument(
@@ -457,21 +458,24 @@ where
         )
     )]
     pub async fn heartbeat(&self, duration: Option<std::time::Duration>) -> TaskResult<()> {
-        let extend_by = duration
-            .map(|d| d.as_secs() as i32)
-            .unwrap_or(self.claim_timeout as i32);
+        let extend_by = duration.unwrap_or(self.claim_timeout);
+
+        if extend_by < std::time::Duration::from_secs(1) {
+            return Err(TaskError::Validation {
+                message: "heartbeat duration must be at least 1 second".to_string(),
+            });
+        }
 
         let query = "SELECT durable.extend_claim($1, $2, $3)";
         sqlx::query(query)
             .bind(&self.queue_name)
             .bind(self.run_id)
-            .bind(extend_by)
+            .bind(extend_by.as_secs() as i32)
             .execute(&self.pool)
             .await?;
 
         // Notify worker that lease was extended so it can reset timers
-        self.lease_extender
-            .notify(Duration::from_secs(extend_by as u64));
+        self.lease_extender.notify(extend_by);
 
         Ok(())
     }
@@ -836,7 +840,7 @@ mod tests {
                 headers: None,
                 wake_event: None,
             },
-            10,
+            Duration::from_secs(10),
             LeaseExtender::dummy_for_tests(),
             Arc::new(RwLock::new(TaskRegistry::new())),
             (),

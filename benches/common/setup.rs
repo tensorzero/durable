@@ -120,11 +120,11 @@ pub async fn clear_completed_tasks(pool: &PgPool, queue: &str) {
 }
 
 /// Default worker options optimized for benchmarking
-pub fn bench_worker_options(concurrency: usize, claim_timeout: u64) -> WorkerOptions {
+pub fn bench_worker_options(concurrency: usize, claim_timeout: Duration) -> WorkerOptions {
     WorkerOptions {
         worker_id: None,
         concurrency,
-        poll_interval: 0.001, // Very fast polling for accurate timing
+        poll_interval: Duration::from_millis(1), // Very fast polling for accurate timing
         claim_timeout,
         batch_size: None, // Use default (= concurrency)
         fatal_on_lease_timeout: false,

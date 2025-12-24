@@ -40,11 +40,12 @@ async fn test_emit_event_wakes_waiter(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to start waiting
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -113,11 +114,12 @@ async fn test_event_already_emitted_returns_immediately(pool: PgPool) -> sqlx::R
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Task should complete quickly since event exists
     let terminal = wait_for_task_terminal(
@@ -170,11 +172,12 @@ async fn test_event_timeout_triggers(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to fail due to timeout
     let terminal = wait_for_task_terminal(
@@ -226,12 +229,13 @@ async fn test_multiple_waiters_same_event(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 3,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for all tasks to start waiting
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -279,7 +283,9 @@ async fn test_event_payload_preserved_on_retry(pool: PgPool) -> sqlx::Result<()>
                 event_name: "retry_event".to_string(),
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(2),
                 ..Default::default()
             },
@@ -289,11 +295,12 @@ async fn test_event_payload_preserved_on_retry(pool: PgPool) -> sqlx::Result<()>
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to start waiting for event
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -360,11 +367,12 @@ async fn test_event_first_writer_wins(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -411,11 +419,12 @@ async fn test_multiple_distinct_events(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to start
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -481,11 +490,12 @@ async fn test_event_write_does_not_propagate_after_wake(pool: PgPool) -> sqlx::R
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to start waiting for event
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -551,12 +561,13 @@ async fn test_emit_from_different_task(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 2,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for waiter to start
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -726,11 +737,12 @@ async fn test_event_timeout_error_payload(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to fail due to timeout
     let terminal = wait_for_task_terminal(
@@ -853,12 +865,13 @@ async fn test_event_race_stress(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.01,
-            claim_timeout: 60,
+            poll_interval: Duration::from_millis(10),
+            claim_timeout: Duration::from_secs(60),
             concurrency: 32,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     for round in 0..rounds {
         let mut task_ids = Vec::with_capacity(tasks_per_round);

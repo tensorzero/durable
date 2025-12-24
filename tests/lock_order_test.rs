@@ -55,11 +55,12 @@ async fn test_complete_run_with_lock_ordering(pool: PgPool) -> sqlx::Result<()> 
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -89,7 +90,7 @@ async fn test_fail_run_with_lock_ordering(pool: PgPool) -> sqlx::Result<()> {
                 error_message: "intentional failure".to_string(),
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed { base_delay: Duration::from_secs(0) }),
                 max_attempts: Some(2),
                 ..Default::default()
             },
@@ -99,11 +100,12 @@ async fn test_fail_run_with_lock_ordering(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     let terminal = wait_for_task_terminal(
         &pool,
@@ -134,11 +136,12 @@ async fn test_sleep_for_with_lock_ordering(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to complete
     let terminal = wait_for_task_terminal(
@@ -175,12 +178,13 @@ async fn test_concurrent_complete_and_cancel(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 5,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Let tasks start
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -234,11 +238,12 @@ async fn test_emit_event_with_lock_ordering(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to start sleeping (awaiting event)
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -300,12 +305,13 @@ async fn test_concurrent_emit_and_cancel(pool: PgPool) -> sqlx::Result<()> {
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             concurrency: 5,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for all tasks to start sleeping
     tokio::time::sleep(Duration::from_millis(500)).await;

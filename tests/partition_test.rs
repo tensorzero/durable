@@ -36,7 +36,9 @@ async fn test_db_connection_lost_during_checkpoint(pool: PgPool) -> sqlx::Result
                 fail_after_step2: true,
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(3),
                 ..Default::default()
             },
@@ -46,11 +48,12 @@ async fn test_db_connection_lost_during_checkpoint(pool: PgPool) -> sqlx::Result
 
     let worker = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 30,
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to fail (will retry but always fail after step 2)
     let terminal = wait_for_task_terminal(
@@ -89,7 +92,7 @@ async fn test_stale_worker_checkpoint_rejected(pool: PgPool) -> sqlx::Result<()>
     client.create_queue(None).await.unwrap();
     client.register::<SlowNoHeartbeatTask>().await.unwrap();
 
-    let claim_timeout = 2; // Short lease
+    let claim_timeout = Duration::from_secs(2); // Short lease
 
     // Spawn a slow task
     let spawn_result = client
@@ -98,7 +101,9 @@ async fn test_stale_worker_checkpoint_rejected(pool: PgPool) -> sqlx::Result<()>
                 sleep_ms: 30000, // 30 seconds
             },
             SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed { base_seconds: 0 }),
+                retry_strategy: Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                }),
                 max_attempts: Some(5),
                 ..Default::default()
             },
@@ -109,11 +114,12 @@ async fn test_stale_worker_checkpoint_rejected(pool: PgPool) -> sqlx::Result<()>
     // First worker claims the task
     let worker1 = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
+            poll_interval: Duration::from_millis(50),
             claim_timeout,
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for task to be claimed
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -122,16 +128,17 @@ async fn test_stale_worker_checkpoint_rejected(pool: PgPool) -> sqlx::Result<()>
     worker1.shutdown().await;
 
     // Wait for lease to expire
-    tokio::time::sleep(Duration::from_secs(claim_timeout + 1)).await;
+    tokio::time::sleep(claim_timeout + Duration::from_secs(1)).await;
 
     // Second worker reclaims
     let worker2 = client
         .start_worker(WorkerOptions {
-            poll_interval: 0.05,
-            claim_timeout: 60, // Longer timeout
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(60), // Longer timeout
             ..Default::default()
         })
-        .await;
+        .await
+        .unwrap();
 
     // Wait for reclaim to happen
     tokio::time::sleep(Duration::from_secs(2)).await;
