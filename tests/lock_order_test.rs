@@ -22,8 +22,10 @@ use common::tasks::{
     DoubleParams, DoubleTask, FailingParams, FailingTask, SleepParams, SleepingTask,
 };
 use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
-use sqlx::{AssertSqlSafe, PgPool};
-use std::time::Duration;
+use sqlx::postgres::{PgConnectOptions, PgConnection};
+use sqlx::{AssertSqlSafe, Connection, PgPool};
+use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
     Durable::builder()
@@ -360,6 +362,137 @@ async fn test_concurrent_emit_and_cancel(pool: PgPool) -> sqlx::Result<()> {
             "Non-cancelled task should be completed"
         );
     }
+
+    Ok(())
+}
+
+/// Regression test: claim_task uses SKIP LOCKED to avoid deadlock with emit_event.
+///
+/// emit_event locks tasks first (locked_tasks CTE with FOR UPDATE), then updates runs.
+/// claim_task joins runs+tasks with FOR UPDATE SKIP LOCKED.
+///
+/// This test verifies that when a task is locked (simulating emit_event holding the lock),
+/// claim_task skips that task instead of blocking (which would cause deadlock).
+///
+/// We make the test deterministic by:
+/// - Creating a task and making it claimable (pending state)
+/// - Holding a FOR UPDATE lock on the task row in a separate connection
+/// - Calling claim_task - it should complete immediately with 0 results (not block)
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_claim_task_skips_locked_tasks_no_deadlock(pool: PgPool) -> sqlx::Result<()> {
+    let queue = "skip_locked_test";
+
+    // Setup: Create queue and spawn a task
+    sqlx::query("SELECT durable.create_queue($1)")
+        .bind(queue)
+        .execute(&pool)
+        .await?;
+
+    let (task_id, run_id): (Uuid, Uuid) =
+        sqlx::query_as("SELECT task_id, run_id FROM durable.spawn_task($1, $2, $3, $4)")
+            .bind(queue)
+            .bind("test-task")
+            .bind(serde_json::json!({}))
+            .bind(serde_json::json!({}))
+            .fetch_one(&pool)
+            .await?;
+
+    // Verify task is pending and claimable
+    let state = get_task_state(&pool, queue, task_id).await?;
+    assert_eq!(state, Some("pending".to_string()));
+
+    // Get connect options from pool for creating separate connections
+    let connect_opts: PgConnectOptions = (*pool.connect_options()).clone();
+
+    // Open lock connection and hold FOR UPDATE lock on the task row
+    // This simulates emit_event's locked_tasks CTE holding the lock mid-transaction
+    let lock_opts = connect_opts.clone().application_name("durable-task-locker");
+    let mut lock_conn = PgConnection::connect_with(&lock_opts).await?;
+
+    sqlx::query("BEGIN").execute(&mut lock_conn).await?;
+    sqlx::query(AssertSqlSafe(format!(
+        "SELECT 1 FROM durable.t_{} WHERE task_id = $1 FOR UPDATE",
+        queue
+    )))
+    .bind(task_id)
+    .execute(&mut lock_conn)
+    .await?;
+
+    // Wait until the lock is confirmed held by checking pg_stat_activity
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT state FROM pg_stat_activity WHERE application_name = $1",
+        )
+        .bind("durable-task-locker")
+        .fetch_optional(&pool)
+        .await?;
+
+        if let Some((ref state,)) = row
+            && state == "idle in transaction"
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Lock connection did not reach expected state"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Now call claim_task from another connection
+    // If SKIP LOCKED works correctly, it should complete immediately with 0 results
+    // If SKIP LOCKED didn't apply to the task table, it would block and timeout
+    let claim_opts = connect_opts.clone().application_name("durable-claimer");
+    let mut claim_conn = PgConnection::connect_with(&claim_opts).await?;
+
+    // Set a short statement timeout - if claim_task blocks, it will fail
+    sqlx::query("SET statement_timeout = '500ms'")
+        .execute(&mut claim_conn)
+        .await?;
+
+    let claim_result: Vec<(Uuid,)> =
+        sqlx::query_as("SELECT run_id FROM durable.claim_task($1, $2, $3, $4)")
+            .bind(queue)
+            .bind("worker")
+            .bind(60)
+            .bind(1)
+            .fetch_all(&mut claim_conn)
+            .await?;
+
+    // claim_task should have completed (not timed out) and returned 0 results
+    // because the task was locked and SKIP LOCKED caused it to be skipped
+    assert!(
+        claim_result.is_empty(),
+        "claim_task should skip locked task, but got {} results",
+        claim_result.len()
+    );
+
+    // Reset statement timeout
+    sqlx::query("SET statement_timeout = 0")
+        .execute(&mut claim_conn)
+        .await?;
+
+    // Release the lock
+    sqlx::query("ROLLBACK").execute(&mut lock_conn).await?;
+    drop(lock_conn);
+
+    // Now claim_task should be able to claim the task
+    let claim_result2: Vec<(Uuid,)> =
+        sqlx::query_as("SELECT run_id FROM durable.claim_task($1, $2, $3, $4)")
+            .bind(queue)
+            .bind("worker")
+            .bind(60)
+            .bind(1)
+            .fetch_all(&mut claim_conn)
+            .await?;
+
+    assert_eq!(
+        claim_result2.len(),
+        1,
+        "claim_task should claim the task after lock is released"
+    );
+    assert_eq!(claim_result2[0].0, run_id);
 
     Ok(())
 }
