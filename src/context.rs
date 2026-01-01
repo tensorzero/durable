@@ -72,6 +72,9 @@ where
 
     /// Task registry for validating spawn_by_name calls.
     registry: Arc<RwLock<TaskRegistry<State>>>,
+
+    /// Default max attempts for subtasks spawned via spawn_by_name.
+    default_max_attempts: u32,
 }
 
 /// Validate that a user-provided step name doesn't use reserved prefix.
@@ -98,6 +101,7 @@ where
         lease_extender: LeaseExtender,
         registry: Arc<RwLock<TaskRegistry<State>>>,
         state: State,
+        default_max_attempts: u32,
     ) -> Result<Self, sqlx::Error> {
         // Load all checkpoints for this task into cache
         let checkpoints: Vec<CheckpointRow> = sqlx::query_as(
@@ -127,6 +131,7 @@ where
             lease_extender,
             registry,
             state,
+            default_max_attempts,
         })
     }
 
@@ -668,6 +673,12 @@ where
             }
         }
 
+        // Apply default max_attempts if not set
+        let options = SpawnOptions {
+            max_attempts: Some(options.max_attempts.unwrap_or(self.default_max_attempts)),
+            ..options
+        };
+
         // Build options JSON, merging user options with parent_task_id
         #[derive(Serialize)]
         struct SubtaskOptions<'a> {
@@ -844,6 +855,7 @@ mod tests {
             LeaseExtender::dummy_for_tests(),
             Arc::new(RwLock::new(TaskRegistry::new())),
             (),
+            5, // default_max_attempts
         )
         .await
         .unwrap();

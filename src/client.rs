@@ -617,6 +617,7 @@ where
             self.registry.clone(),
             options,
             self.state.clone(),
+            self.default_max_attempts,
         )
         .await)
     }

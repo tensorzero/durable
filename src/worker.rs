@@ -67,6 +67,7 @@ impl Worker {
         registry: Arc<RwLock<TaskRegistry<State>>>,
         options: WorkerOptions,
         state: State,
+        default_max_attempts: u32,
     ) -> Self
     where
         State: Clone + Send + Sync + 'static,
@@ -92,6 +93,7 @@ impl Worker {
             worker_id,
             shutdown_rx,
             state,
+            default_max_attempts,
         ));
 
         Self {
@@ -117,6 +119,7 @@ impl Worker {
         worker_id: String,
         mut shutdown_rx: broadcast::Receiver<()>,
         state: State,
+        default_max_attempts: u32,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -200,6 +203,7 @@ impl Worker {
                                 claim_timeout,
                                 fatal_on_lease_timeout,
                                 state,
+                                default_max_attempts,
                             ).await;
 
                             drop(permit);
@@ -266,6 +270,7 @@ impl Worker {
         claim_timeout: Duration,
         fatal_on_lease_timeout: bool,
         state: State,
+        default_max_attempts: u32,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -295,6 +300,7 @@ impl Worker {
             claim_timeout,
             fatal_on_lease_timeout,
             state,
+            default_max_attempts,
         )
         .instrument(span)
         .await
@@ -308,6 +314,7 @@ impl Worker {
         claim_timeout: Duration,
         fatal_on_lease_timeout: bool,
         state: State,
+        default_max_attempts: u32,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -333,6 +340,7 @@ impl Worker {
             lease_extender,
             registry.clone(),
             state.clone(),
+            default_max_attempts,
         )
         .await
         {
