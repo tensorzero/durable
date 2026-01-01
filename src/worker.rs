@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::context::TaskContext;
 use crate::error::{ControlFlow, TaskError, serialize_task_error};
 use crate::task::TaskRegistry;
-use crate::types::{ClaimedTask, ClaimedTaskRow, WorkerOptions};
+use crate::types::{CancellationPolicy, ClaimedTask, ClaimedTaskRow, RetryStrategy, WorkerOptions};
 
 /// Notifies the worker that the lease has been extended.
 /// Used by TaskContext to reset warning/fatal timers.
@@ -68,6 +68,8 @@ impl Worker {
         options: WorkerOptions,
         state: State,
         default_max_attempts: u32,
+        default_retry_strategy: Option<RetryStrategy>,
+        default_cancellation: Option<CancellationPolicy>,
     ) -> Self
     where
         State: Clone + Send + Sync + 'static,
@@ -94,6 +96,8 @@ impl Worker {
             shutdown_rx,
             state,
             default_max_attempts,
+            default_retry_strategy,
+            default_cancellation,
         ));
 
         Self {
@@ -120,6 +124,8 @@ impl Worker {
         mut shutdown_rx: broadcast::Receiver<()>,
         state: State,
         default_max_attempts: u32,
+        default_retry_strategy: Option<RetryStrategy>,
+        default_cancellation: Option<CancellationPolicy>,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -193,6 +199,8 @@ impl Worker {
                         let registry = registry.clone();
                         let done_tx = done_tx.clone();
                         let state = state.clone();
+                        let default_retry_strategy = default_retry_strategy.clone();
+                        let default_cancellation = default_cancellation.clone();
 
                         tokio::spawn(async move {
                             Self::execute_task(
@@ -204,6 +212,8 @@ impl Worker {
                                 fatal_on_lease_timeout,
                                 state,
                                 default_max_attempts,
+                                default_retry_strategy,
+                                default_cancellation,
                             ).await;
 
                             drop(permit);
@@ -271,6 +281,8 @@ impl Worker {
         fatal_on_lease_timeout: bool,
         state: State,
         default_max_attempts: u32,
+        default_retry_strategy: Option<RetryStrategy>,
+        default_cancellation: Option<CancellationPolicy>,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -301,6 +313,8 @@ impl Worker {
             fatal_on_lease_timeout,
             state,
             default_max_attempts,
+            default_retry_strategy,
+            default_cancellation,
         )
         .instrument(span)
         .await
@@ -315,6 +329,8 @@ impl Worker {
         fatal_on_lease_timeout: bool,
         state: State,
         default_max_attempts: u32,
+        default_retry_strategy: Option<RetryStrategy>,
+        default_cancellation: Option<CancellationPolicy>,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -341,6 +357,8 @@ impl Worker {
             registry.clone(),
             state.clone(),
             default_max_attempts,
+            default_retry_strategy,
+            default_cancellation,
         )
         .await
         {

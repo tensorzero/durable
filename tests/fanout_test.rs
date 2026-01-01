@@ -8,7 +8,8 @@ use common::tasks::{
     SpawnByNameParams, SpawnByNameTask, SpawnFailingChildTask, SpawnSlowChildParams,
     SpawnSlowChildTask,
 };
-use durable::{Durable, MIGRATOR, WorkerOptions};
+use durable::{CancellationPolicy, Durable, MIGRATOR, RetryStrategy, WorkerOptions};
+use serde_json::Value as JsonValue;
 use sqlx::{AssertSqlSafe, PgPool};
 use std::time::Duration;
 
@@ -474,13 +475,43 @@ async fn get_task_max_attempts(
     result.max_attempts
 }
 
+/// Helper to query retry_strategy from the database.
+async fn get_task_retry_strategy(
+    pool: &PgPool,
+    queue_name: &str,
+    task_id: uuid::Uuid,
+) -> Option<JsonValue> {
+    #[derive(sqlx::FromRow)]
+    struct TaskRetryStrategy {
+        retry_strategy: Option<JsonValue>,
+    }
+    let query = AssertSqlSafe(format!(
+        "SELECT retry_strategy FROM durable.t_{queue_name} WHERE task_id = $1"
+    ));
+    let result: TaskRetryStrategy = sqlx::query_as(query)
+        .bind(task_id)
+        .fetch_one(pool)
+        .await
+        .expect("Failed to query task retry_strategy");
+    result.retry_strategy
+}
+
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_spawn_by_name_from_task_context(pool: PgPool) -> sqlx::Result<()> {
-    // Use custom default_max_attempts to verify subtasks inherit it
+    // Use custom defaults to verify subtasks inherit them
     let client = Durable::builder()
         .pool(pool.clone())
         .queue_name("fanout_by_name")
-        .default_max_attempts(7) // Custom default to verify inheritance
+        .default_max_attempts(7)
+        .default_retry_strategy(RetryStrategy::Exponential {
+            base_delay: Duration::from_secs(10),
+            factor: 3.0,
+            max_backoff: Duration::from_secs(600),
+        })
+        .default_cancellation(CancellationPolicy {
+            max_pending_time: Some(Duration::from_secs(3600)),
+            max_running_time: None,
+        })
         .build()
         .await
         .expect("Failed to create client");
@@ -542,6 +573,30 @@ async fn test_spawn_by_name_from_task_context(pool: PgPool) -> sqlx::Result<()> 
         child_max_attempts,
         Some(7),
         "Child task spawned via spawn_by_name should inherit default_max_attempts=7"
+    );
+
+    // Verify child task has the default retry_strategy from the client config
+    let child_retry_strategy =
+        get_task_retry_strategy(&pool, "fanout_by_name", child_task_id).await;
+    assert!(
+        child_retry_strategy.is_some(),
+        "Child task should have a retry_strategy"
+    );
+    let strategy = child_retry_strategy.unwrap();
+    assert_eq!(
+        strategy.get("kind").and_then(|v| v.as_str()),
+        Some("exponential"),
+        "Child task should inherit exponential retry strategy"
+    );
+    assert_eq!(
+        strategy.get("base_seconds").and_then(|v| v.as_u64()),
+        Some(10),
+        "Child task should inherit base_delay=10s"
+    );
+    assert_eq!(
+        strategy.get("factor").and_then(|v| v.as_f64()),
+        Some(3.0),
+        "Child task should inherit factor=3.0"
     );
 
     Ok(())

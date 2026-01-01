@@ -111,6 +111,8 @@ where
     owns_pool: bool,
     queue_name: String,
     default_max_attempts: u32,
+    default_retry_strategy: Option<RetryStrategy>,
+    default_cancellation: Option<CancellationPolicy>,
     registry: Arc<RwLock<TaskRegistry<State>>>,
     state: State,
 }
@@ -139,6 +141,8 @@ pub struct DurableBuilder {
     pool: Option<PgPool>,
     queue_name: String,
     default_max_attempts: u32,
+    default_retry_strategy: Option<RetryStrategy>,
+    default_cancellation: Option<CancellationPolicy>,
 }
 
 impl DurableBuilder {
@@ -148,6 +152,8 @@ impl DurableBuilder {
             pool: None,
             queue_name: "default".to_string(),
             default_max_attempts: 5,
+            default_retry_strategy: None,
+            default_cancellation: None,
         }
     }
 
@@ -172,6 +178,18 @@ impl DurableBuilder {
     /// Set default max attempts for spawned tasks (default: 5)
     pub fn default_max_attempts(mut self, attempts: u32) -> Self {
         self.default_max_attempts = attempts;
+        self
+    }
+
+    /// Set default retry strategy for spawned tasks (default: Fixed with 5s delay)
+    pub fn default_retry_strategy(mut self, strategy: RetryStrategy) -> Self {
+        self.default_retry_strategy = Some(strategy);
+        self
+    }
+
+    /// Set default cancellation policy for spawned tasks (default: no auto-cancellation)
+    pub fn default_cancellation(mut self, policy: CancellationPolicy) -> Self {
+        self.default_cancellation = Some(policy);
         self
     }
 
@@ -227,6 +245,8 @@ impl DurableBuilder {
             owns_pool,
             queue_name: self.queue_name,
             default_max_attempts: self.default_max_attempts,
+            default_retry_strategy: self.default_retry_strategy,
+            default_cancellation: self.default_cancellation,
             registry: Arc::new(RwLock::new(HashMap::new())),
             state,
         })
@@ -439,7 +459,17 @@ where
         #[cfg(feature = "telemetry")]
         tracing::Span::current().record("queue", &self.queue_name);
 
+        // Apply defaults if not set
         let max_attempts = options.max_attempts.unwrap_or(self.default_max_attempts);
+        let options = SpawnOptions {
+            retry_strategy: options
+                .retry_strategy
+                .or_else(|| self.default_retry_strategy.clone()),
+            cancellation: options
+                .cancellation
+                .or_else(|| self.default_cancellation.clone()),
+            ..options
+        };
 
         let db_options = Self::serialize_spawn_options(&options, max_attempts)?;
 
@@ -618,6 +648,8 @@ where
             options,
             self.state.clone(),
             self.default_max_attempts,
+            self.default_retry_strategy.clone(),
+            self.default_cancellation.clone(),
         )
         .await)
     }
