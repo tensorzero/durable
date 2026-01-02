@@ -8,7 +8,8 @@ use common::tasks::{
     SpawnByNameParams, SpawnByNameTask, SpawnFailingChildTask, SpawnSlowChildParams,
     SpawnSlowChildTask,
 };
-use durable::{Durable, MIGRATOR, WorkerOptions};
+use durable::{CancellationPolicy, Durable, MIGRATOR, RetryStrategy, WorkerOptions};
+use serde_json::Value as JsonValue;
 use sqlx::{AssertSqlSafe, PgPool};
 use std::time::Duration;
 
@@ -453,9 +454,68 @@ async fn test_cascade_cancel_when_parent_auto_cancelled_by_max_duration(
 // spawn_by_name Tests
 // ============================================================================
 
+/// Helper to query max_attempts from the database.
+async fn get_task_max_attempts(
+    pool: &PgPool,
+    queue_name: &str,
+    task_id: uuid::Uuid,
+) -> Option<i32> {
+    #[derive(sqlx::FromRow)]
+    struct TaskMaxAttempts {
+        max_attempts: Option<i32>,
+    }
+    let query = AssertSqlSafe(format!(
+        "SELECT max_attempts FROM durable.t_{queue_name} WHERE task_id = $1"
+    ));
+    let result: TaskMaxAttempts = sqlx::query_as(query)
+        .bind(task_id)
+        .fetch_one(pool)
+        .await
+        .expect("Failed to query task max_attempts");
+    result.max_attempts
+}
+
+/// Helper to query retry_strategy from the database.
+async fn get_task_retry_strategy(
+    pool: &PgPool,
+    queue_name: &str,
+    task_id: uuid::Uuid,
+) -> Option<JsonValue> {
+    #[derive(sqlx::FromRow)]
+    struct TaskRetryStrategy {
+        retry_strategy: Option<JsonValue>,
+    }
+    let query = AssertSqlSafe(format!(
+        "SELECT retry_strategy FROM durable.t_{queue_name} WHERE task_id = $1"
+    ));
+    let result: TaskRetryStrategy = sqlx::query_as(query)
+        .bind(task_id)
+        .fetch_one(pool)
+        .await
+        .expect("Failed to query task retry_strategy");
+    result.retry_strategy
+}
+
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_spawn_by_name_from_task_context(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "fanout_by_name").await;
+    // Use custom defaults to verify subtasks inherit them
+    let client = Durable::builder()
+        .pool(pool.clone())
+        .queue_name("fanout_by_name")
+        .default_max_attempts(7)
+        .default_retry_strategy(RetryStrategy::Exponential {
+            base_delay: Duration::from_secs(10),
+            factor: 3.0,
+            max_backoff: Duration::from_secs(600),
+        })
+        .default_cancellation(CancellationPolicy {
+            max_pending_time: Some(Duration::from_secs(3600)),
+            max_running_time: None,
+        })
+        .build()
+        .await
+        .expect("Failed to create client");
+
     client.create_queue(None).await.unwrap();
     client.register::<SpawnByNameTask>().await.unwrap();
     client.register::<DoubleTask>().await.unwrap();
@@ -495,6 +555,48 @@ async fn test_spawn_by_name_from_task_context(pool: PgPool) -> sqlx::Result<()> 
     assert_eq!(
         output.child_result, 42,
         "Child should have doubled 21 to 42 (spawned via spawn_by_name)"
+    );
+
+    // Find the child task and verify it inherited the default_max_attempts
+    let child_query = "SELECT task_id FROM durable.t_fanout_by_name WHERE parent_task_id = $1";
+    let child_ids: Vec<(uuid::Uuid,)> = sqlx::query_as(child_query)
+        .bind(spawn_result.task_id)
+        .fetch_all(&pool)
+        .await?;
+
+    assert_eq!(child_ids.len(), 1, "Should have exactly one child task");
+    let child_task_id = child_ids[0].0;
+
+    // Verify child task has the default max_attempts from the client config
+    let child_max_attempts = get_task_max_attempts(&pool, "fanout_by_name", child_task_id).await;
+    assert_eq!(
+        child_max_attempts,
+        Some(7),
+        "Child task spawned via spawn_by_name should inherit default_max_attempts=7"
+    );
+
+    // Verify child task has the default retry_strategy from the client config
+    let child_retry_strategy =
+        get_task_retry_strategy(&pool, "fanout_by_name", child_task_id).await;
+    assert!(
+        child_retry_strategy.is_some(),
+        "Child task should have a retry_strategy"
+    );
+    let strategy = child_retry_strategy.unwrap();
+    assert_eq!(
+        strategy.get("kind").and_then(|v| v.as_str()),
+        Some("exponential"),
+        "Child task should inherit exponential retry strategy"
+    );
+    assert_eq!(
+        strategy.get("base_seconds").and_then(|v| v.as_u64()),
+        Some(10),
+        "Child task should inherit base_delay=10s"
+    );
+    assert_eq!(
+        strategy.get("factor").and_then(|v| v.as_f64()),
+        Some(3.0),
+        "Child task should inherit factor=3.0"
     );
 
     Ok(())
@@ -728,9 +830,11 @@ async fn test_join_timeout_when_parent_claim_expires(pool: PgPool) -> sqlx::Resu
 
         let error_name = failed_payload.get("name").and_then(|v| v.as_str());
         // Could be Timeout or other error depending on how the timeout manifests
+        // ChildFailed is also valid when child tasks have bounded max_attempts
         assert!(
             error_name == Some("Timeout")
                 || error_name == Some("ChildCancelled")
+                || error_name == Some("ChildFailed")
                 || error_name == Some("TaskInternal"),
             "Expected timeout-related error, got: {:?}",
             error_name

@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::context::TaskContext;
 use crate::error::{ControlFlow, TaskError, serialize_task_error};
 use crate::task::TaskRegistry;
-use crate::types::{ClaimedTask, ClaimedTaskRow, WorkerOptions};
+use crate::types::{ClaimedTask, ClaimedTaskRow, SpawnDefaults, WorkerOptions};
 
 /// Notifies the worker that the lease has been extended.
 /// Used by TaskContext to reset warning/fatal timers.
@@ -67,6 +67,7 @@ impl Worker {
         registry: Arc<RwLock<TaskRegistry<State>>>,
         options: WorkerOptions,
         state: State,
+        spawn_defaults: SpawnDefaults,
     ) -> Self
     where
         State: Clone + Send + Sync + 'static,
@@ -92,6 +93,7 @@ impl Worker {
             worker_id,
             shutdown_rx,
             state,
+            spawn_defaults,
         ));
 
         Self {
@@ -109,6 +111,7 @@ impl Worker {
         let _ = self.handle.await;
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_loop<State>(
         pool: PgPool,
         queue_name: String,
@@ -117,6 +120,7 @@ impl Worker {
         worker_id: String,
         mut shutdown_rx: broadcast::Receiver<()>,
         state: State,
+        spawn_defaults: SpawnDefaults,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -190,6 +194,7 @@ impl Worker {
                         let registry = registry.clone();
                         let done_tx = done_tx.clone();
                         let state = state.clone();
+                        let spawn_defaults = spawn_defaults.clone();
 
                         tokio::spawn(async move {
                             Self::execute_task(
@@ -200,6 +205,7 @@ impl Worker {
                                 claim_timeout,
                                 fatal_on_lease_timeout,
                                 state,
+                                spawn_defaults,
                             ).await;
 
                             drop(permit);
@@ -258,6 +264,7 @@ impl Worker {
         Ok(tasks)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn execute_task<State>(
         pool: PgPool,
         queue_name: String,
@@ -266,6 +273,7 @@ impl Worker {
         claim_timeout: Duration,
         fatal_on_lease_timeout: bool,
         state: State,
+        spawn_defaults: SpawnDefaults,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -295,11 +303,13 @@ impl Worker {
             claim_timeout,
             fatal_on_lease_timeout,
             state,
+            spawn_defaults,
         )
         .instrument(span)
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn execute_task_inner<State>(
         pool: PgPool,
         queue_name: String,
@@ -308,6 +318,7 @@ impl Worker {
         claim_timeout: Duration,
         fatal_on_lease_timeout: bool,
         state: State,
+        spawn_defaults: SpawnDefaults,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -333,6 +344,7 @@ impl Worker {
             lease_extender,
             registry.clone(),
             state.clone(),
+            spawn_defaults,
         )
         .await
         {

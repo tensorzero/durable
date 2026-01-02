@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use sqlx::{AssertSqlSafe, PgPool};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod common;
 
@@ -538,14 +538,33 @@ async fn test_slow_task_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
     // Wait for real time to pass the lease timeout
     tokio::time::sleep(claim_timeout + Duration::from_secs(2)).await;
 
-    // Verify a new run was created (reclaim happened)
-    let run_count = count_runs_for_task(&pool, "crash_slow", spawn_result.task_id).await?;
+    // Second worker polls to reclaim the expired lease.
+    let worker2 = client
+        .start_worker(WorkerOptions {
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(10),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Verify a new run was created (reclaim happened), with bounded polling.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut run_count = 0;
+    while Instant::now() < deadline {
+        run_count = count_runs_for_task(&pool, "crash_slow", spawn_result.task_id).await?;
+        if run_count >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     assert!(
         run_count >= 2,
         "Should have at least 2 runs after lease expiration, got {}",
         run_count
     );
 
+    worker2.shutdown().await;
     worker.shutdown().await;
 
     Ok(())

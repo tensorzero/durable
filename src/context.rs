@@ -11,8 +11,8 @@ use uuid::Uuid;
 use crate::error::{ControlFlow, TaskError, TaskResult};
 use crate::task::{Task, TaskRegistry};
 use crate::types::{
-    AwaitEventResult, CheckpointRow, ChildCompletePayload, ChildStatus, ClaimedTask, SpawnOptions,
-    SpawnResultRow, TaskHandle,
+    AwaitEventResult, CheckpointRow, ChildCompletePayload, ChildStatus, ClaimedTask, SpawnDefaults,
+    SpawnOptions, SpawnResultRow, TaskHandle,
 };
 use crate::worker::LeaseExtender;
 
@@ -72,6 +72,9 @@ where
 
     /// Task registry for validating spawn_by_name calls.
     registry: Arc<RwLock<TaskRegistry<State>>>,
+
+    /// Default settings for subtasks spawned via spawn/spawn_by_name.
+    spawn_defaults: SpawnDefaults,
 }
 
 /// Validate that a user-provided step name doesn't use reserved prefix.
@@ -90,6 +93,7 @@ where
 {
     /// Create a new TaskContext. Called by the worker before executing a task.
     /// Loads all existing checkpoints into the cache.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn create(
         pool: PgPool,
         queue_name: String,
@@ -98,6 +102,7 @@ where
         lease_extender: LeaseExtender,
         registry: Arc<RwLock<TaskRegistry<State>>>,
         state: State,
+        spawn_defaults: SpawnDefaults,
     ) -> Result<Self, sqlx::Error> {
         // Load all checkpoints for this task into cache
         let checkpoints: Vec<CheckpointRow> = sqlx::query_as(
@@ -127,6 +132,7 @@ where
             lease_extender,
             registry,
             state,
+            spawn_defaults,
         })
     }
 
@@ -668,6 +674,22 @@ where
             }
         }
 
+        // Apply defaults if not set
+        let options = SpawnOptions {
+            max_attempts: Some(
+                options
+                    .max_attempts
+                    .unwrap_or(self.spawn_defaults.max_attempts),
+            ),
+            retry_strategy: options
+                .retry_strategy
+                .or_else(|| self.spawn_defaults.retry_strategy.clone()),
+            cancellation: options
+                .cancellation
+                .or_else(|| self.spawn_defaults.cancellation.clone()),
+            ..options
+        };
+
         // Build options JSON, merging user options with parent_task_id
         #[derive(Serialize)]
         struct SubtaskOptions<'a> {
@@ -844,6 +866,11 @@ mod tests {
             LeaseExtender::dummy_for_tests(),
             Arc::new(RwLock::new(TaskRegistry::new())),
             (),
+            SpawnDefaults {
+                max_attempts: 5,
+                retry_strategy: None,
+                cancellation: None,
+            },
         )
         .await
         .unwrap();
