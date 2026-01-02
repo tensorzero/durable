@@ -443,6 +443,38 @@ where
             .await
     }
 
+    /// Spawn a task by name WITHOUT registry validation.
+    ///
+    /// Use this when you know the task will be registered on the worker,
+    /// but the spawning client doesn't have the task registered locally.
+    pub async fn spawn_by_name_unchecked(
+        &self,
+        task_name: &str,
+        params: JsonValue,
+        options: SpawnOptions,
+    ) -> DurableResult<SpawnResult> {
+        self.spawn_by_name_internal(&self.pool, task_name, params, options)
+            .await
+    }
+
+    /// Spawn a task by name using a custom executor WITHOUT registry validation.
+    ///
+    /// Use this when you know the task will be registered on the worker,
+    /// but the spawning client doesn't have the task registered locally.
+    pub async fn spawn_by_name_unchecked_with<'e, E>(
+        &self,
+        executor: E,
+        task_name: &str,
+        params: JsonValue,
+        options: SpawnOptions,
+    ) -> DurableResult<SpawnResult>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        self.spawn_by_name_internal(executor, task_name, params, options)
+            .await
+    }
+
     /// Internal spawn implementation without registry validation.
     #[allow(unused_mut)] // mut is needed when telemetry feature is enabled
     async fn spawn_by_name_internal<'e, E>(
