@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::context::TaskContext;
 use crate::error::{ControlFlow, TaskError, serialize_task_error};
 use crate::task::TaskRegistry;
-use crate::types::{CancellationPolicy, ClaimedTask, ClaimedTaskRow, RetryStrategy, WorkerOptions};
+use crate::types::{ClaimedTask, ClaimedTaskRow, SpawnDefaults, WorkerOptions};
 
 /// Notifies the worker that the lease has been extended.
 /// Used by TaskContext to reset warning/fatal timers.
@@ -67,9 +67,7 @@ impl Worker {
         registry: Arc<RwLock<TaskRegistry<State>>>,
         options: WorkerOptions,
         state: State,
-        default_max_attempts: u32,
-        default_retry_strategy: Option<RetryStrategy>,
-        default_cancellation: Option<CancellationPolicy>,
+        spawn_defaults: SpawnDefaults,
     ) -> Self
     where
         State: Clone + Send + Sync + 'static,
@@ -95,9 +93,7 @@ impl Worker {
             worker_id,
             shutdown_rx,
             state,
-            default_max_attempts,
-            default_retry_strategy,
-            default_cancellation,
+            spawn_defaults,
         ));
 
         Self {
@@ -115,6 +111,7 @@ impl Worker {
         let _ = self.handle.await;
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_loop<State>(
         pool: PgPool,
         queue_name: String,
@@ -123,9 +120,7 @@ impl Worker {
         worker_id: String,
         mut shutdown_rx: broadcast::Receiver<()>,
         state: State,
-        default_max_attempts: u32,
-        default_retry_strategy: Option<RetryStrategy>,
-        default_cancellation: Option<CancellationPolicy>,
+        spawn_defaults: SpawnDefaults,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -199,8 +194,7 @@ impl Worker {
                         let registry = registry.clone();
                         let done_tx = done_tx.clone();
                         let state = state.clone();
-                        let default_retry_strategy = default_retry_strategy.clone();
-                        let default_cancellation = default_cancellation.clone();
+                        let spawn_defaults = spawn_defaults.clone();
 
                         tokio::spawn(async move {
                             Self::execute_task(
@@ -211,9 +205,7 @@ impl Worker {
                                 claim_timeout,
                                 fatal_on_lease_timeout,
                                 state,
-                                default_max_attempts,
-                                default_retry_strategy,
-                                default_cancellation,
+                                spawn_defaults,
                             ).await;
 
                             drop(permit);
@@ -272,6 +264,7 @@ impl Worker {
         Ok(tasks)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn execute_task<State>(
         pool: PgPool,
         queue_name: String,
@@ -280,9 +273,7 @@ impl Worker {
         claim_timeout: Duration,
         fatal_on_lease_timeout: bool,
         state: State,
-        default_max_attempts: u32,
-        default_retry_strategy: Option<RetryStrategy>,
-        default_cancellation: Option<CancellationPolicy>,
+        spawn_defaults: SpawnDefaults,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -312,14 +303,13 @@ impl Worker {
             claim_timeout,
             fatal_on_lease_timeout,
             state,
-            default_max_attempts,
-            default_retry_strategy,
-            default_cancellation,
+            spawn_defaults,
         )
         .instrument(span)
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn execute_task_inner<State>(
         pool: PgPool,
         queue_name: String,
@@ -328,9 +318,7 @@ impl Worker {
         claim_timeout: Duration,
         fatal_on_lease_timeout: bool,
         state: State,
-        default_max_attempts: u32,
-        default_retry_strategy: Option<RetryStrategy>,
-        default_cancellation: Option<CancellationPolicy>,
+        spawn_defaults: SpawnDefaults,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -356,9 +344,7 @@ impl Worker {
             lease_extender,
             registry.clone(),
             state.clone(),
-            default_max_attempts,
-            default_retry_strategy,
-            default_cancellation,
+            spawn_defaults,
         )
         .await
         {

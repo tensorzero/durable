@@ -107,8 +107,8 @@ pub use context::TaskContext;
 pub use error::{ControlFlow, DurableError, DurableResult, TaskError, TaskResult};
 pub use task::Task;
 pub use types::{
-    CancellationPolicy, ClaimedTask, RetryStrategy, SpawnOptions, SpawnResult, TaskHandle,
-    WorkerOptions,
+    CancellationPolicy, ClaimedTask, RetryStrategy, SpawnDefaults, SpawnOptions, SpawnResult,
+    TaskHandle, WorkerOptions,
 };
 pub use worker::Worker;
 

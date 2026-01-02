@@ -315,6 +315,21 @@ impl<T> TaskHandle<T> {
     }
 }
 
+/// Default settings for spawned tasks.
+///
+/// Groups the default `max_attempts`, `retry_strategy`, and `cancellation`
+/// settings that are applied when spawning tasks (either from the client
+/// or from within a task context).
+#[derive(Debug, Clone, Default)]
+pub struct SpawnDefaults {
+    /// Default max attempts for spawned tasks (default: 5)
+    pub max_attempts: u32,
+    /// Default retry strategy for spawned tasks
+    pub retry_strategy: Option<RetryStrategy>,
+    /// Default cancellation policy for spawned tasks
+    pub cancellation: Option<CancellationPolicy>,
+}
+
 /// Terminal status of a child task.
 ///
 /// This enum represents the possible terminal states a subtask can be in

@@ -11,8 +11,8 @@ use uuid::Uuid;
 use crate::error::{ControlFlow, TaskError, TaskResult};
 use crate::task::{Task, TaskRegistry};
 use crate::types::{
-    AwaitEventResult, CancellationPolicy, CheckpointRow, ChildCompletePayload, ChildStatus,
-    ClaimedTask, RetryStrategy, SpawnOptions, SpawnResultRow, TaskHandle,
+    AwaitEventResult, CheckpointRow, ChildCompletePayload, ChildStatus, ClaimedTask, SpawnDefaults,
+    SpawnOptions, SpawnResultRow, TaskHandle,
 };
 use crate::worker::LeaseExtender;
 
@@ -73,14 +73,8 @@ where
     /// Task registry for validating spawn_by_name calls.
     registry: Arc<RwLock<TaskRegistry<State>>>,
 
-    /// Default max attempts for subtasks spawned via spawn_by_name.
-    default_max_attempts: u32,
-
-    /// Default retry strategy for subtasks spawned via spawn_by_name.
-    default_retry_strategy: Option<RetryStrategy>,
-
-    /// Default cancellation policy for subtasks spawned via spawn_by_name.
-    default_cancellation: Option<CancellationPolicy>,
+    /// Default settings for subtasks spawned via spawn/spawn_by_name.
+    spawn_defaults: SpawnDefaults,
 }
 
 /// Validate that a user-provided step name doesn't use reserved prefix.
@@ -99,6 +93,7 @@ where
 {
     /// Create a new TaskContext. Called by the worker before executing a task.
     /// Loads all existing checkpoints into the cache.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn create(
         pool: PgPool,
         queue_name: String,
@@ -107,9 +102,7 @@ where
         lease_extender: LeaseExtender,
         registry: Arc<RwLock<TaskRegistry<State>>>,
         state: State,
-        default_max_attempts: u32,
-        default_retry_strategy: Option<RetryStrategy>,
-        default_cancellation: Option<CancellationPolicy>,
+        spawn_defaults: SpawnDefaults,
     ) -> Result<Self, sqlx::Error> {
         // Load all checkpoints for this task into cache
         let checkpoints: Vec<CheckpointRow> = sqlx::query_as(
@@ -139,9 +132,7 @@ where
             lease_extender,
             registry,
             state,
-            default_max_attempts,
-            default_retry_strategy,
-            default_cancellation,
+            spawn_defaults,
         })
     }
 
@@ -685,13 +676,17 @@ where
 
         // Apply defaults if not set
         let options = SpawnOptions {
-            max_attempts: Some(options.max_attempts.unwrap_or(self.default_max_attempts)),
+            max_attempts: Some(
+                options
+                    .max_attempts
+                    .unwrap_or(self.spawn_defaults.max_attempts),
+            ),
             retry_strategy: options
                 .retry_strategy
-                .or_else(|| self.default_retry_strategy.clone()),
+                .or_else(|| self.spawn_defaults.retry_strategy.clone()),
             cancellation: options
                 .cancellation
-                .or_else(|| self.default_cancellation.clone()),
+                .or_else(|| self.spawn_defaults.cancellation.clone()),
             ..options
         };
 
@@ -871,9 +866,11 @@ mod tests {
             LeaseExtender::dummy_for_tests(),
             Arc::new(RwLock::new(TaskRegistry::new())),
             (),
-            5,    // default_max_attempts
-            None, // default_retry_strategy
-            None, // default_cancellation
+            SpawnDefaults {
+                max_attempts: 5,
+                retry_strategy: None,
+                cancellation: None,
+            },
         )
         .await
         .unwrap();
