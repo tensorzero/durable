@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1766867127560,
+  "lastUpdate": 1767323644796,
   "repoUrl": "https://github.com/tensorzero/durable",
   "entries": {
     "Criterion Benchmark": [
@@ -899,6 +899,156 @@ window.BENCHMARK_DATA = {
             "name": "e2e_completion/single_task_roundtrip",
             "value": 15780131,
             "range": "± 570446",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "virajmehta@users.noreply.github.com",
+            "name": "Viraj Mehta",
+            "username": "virajmehta"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ca986b6042829d924d413fc0f42d3bbd87b2df70",
+          "message": "Allow fully configurable defaults for tool spawn settings (#44)\n\n* propagate default num attempts to spawned tasks\n\n* add full defaults for task spawning setting\n\n* added a SpawnDefaults struct\n\n* deflake",
+          "timestamp": "2026-01-02T02:38:03Z",
+          "tree_id": "abc8461822b32f10fbd871378a260962509504d5",
+          "url": "https://github.com/tensorzero/durable/commit/ca986b6042829d924d413fc0f42d3bbd87b2df70"
+        },
+        "date": 1767323643941,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "step_cache_miss/steps/10",
+            "value": 45704454,
+            "range": "± 2245721",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/50",
+            "value": 91140120,
+            "range": "± 2162769",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/100",
+            "value": 147259349,
+            "range": "± 2497716",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/10",
+            "value": 14505224,
+            "range": "± 1602846",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/50",
+            "value": 14716579,
+            "range": "± 2044193",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/100",
+            "value": 16783505,
+            "range": "± 1036779",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1",
+            "value": 30139615,
+            "range": "± 1055044",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/100",
+            "value": 25427507,
+            "range": "± 403581",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1000",
+            "value": 71192245,
+            "range": "± 4307824",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/2",
+            "value": 692338513,
+            "range": "± 18270475",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/4",
+            "value": 434902823,
+            "range": "± 9856424",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/8",
+            "value": 389626727,
+            "range": "± 7418417",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/16",
+            "value": 395894989,
+            "range": "± 25255203",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/baseline",
+            "value": 169369529,
+            "range": "± 7817615",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/contention",
+            "value": 119382223,
+            "range": "± 4826447",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "spawn_latency/single_spawn",
+            "value": 1057856,
+            "range": "± 675347",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/1",
+            "value": 636930439,
+            "range": "± 7523082",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/2",
+            "value": 397703090,
+            "range": "± 4532205",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/4",
+            "value": 273092362,
+            "range": "± 2267123",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/8",
+            "value": 208457419,
+            "range": "± 2631406",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "e2e_completion/single_task_roundtrip",
+            "value": 16142948,
+            "range": "± 628676",
             "unit": "ns/iter"
           }
         ]
