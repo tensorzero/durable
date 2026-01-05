@@ -54,8 +54,10 @@ use crate::error::{TaskError, TaskResult};
 ///
 ///     async fn run(url: Self::Params, mut ctx: TaskContext, state: AppState) -> TaskResult<Self::Output> {
 ///         let body = ctx.step("fetch", || async {
-///             state.http_client.get(&url).send().await?.text().await
-///                 .map_err(|e| anyhow::anyhow!(e))
+///             state.http_client.get(&url).send().await
+///                 .map_err(|e| anyhow::anyhow!("HTTP error: {}", e))?
+///                 .text().await
+///                 .map_err(|e| anyhow::anyhow!("HTTP error: {}", e))
 ///         }).await?;
 ///         Ok(body)
 ///     }
@@ -81,6 +83,10 @@ where
     /// Return `Ok(output)` on success, or `Err(TaskError)` on failure.
     /// Use `?` freely - errors will propagate and the task will be retried
     /// according to its [`RetryStrategy`](crate::RetryStrategy).
+    ///
+    /// For user errors with structured data, use `TaskError::user(data)` where
+    /// data is any serializable value. For simple message errors, use
+    /// `TaskError::user_message("message")`.
     ///
     /// The [`TaskContext`] provides methods for checkpointing, sleeping,
     /// and waiting for events. See [`TaskContext`] for details.

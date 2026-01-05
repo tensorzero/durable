@@ -105,10 +105,22 @@ pub enum TaskError {
         message: String,
     },
 
-    /// An error from user task code.
+    /// A user error from task code.
     ///
-    /// This is the catch-all variant for errors returned by task implementations.
-    /// Use `anyhow::anyhow!()` or `?` on any error type to create this variant.
+    /// This variant stores a serialized user error for persistence and retrieval.
+    /// Created via [`TaskError::user()`] or [`TaskError::user_message()`].
+    #[error("{message}")]
+    User {
+        /// The error message (extracted from "message" field or stringified data)
+        message: String,
+        /// Serialized error data for storage/retrieval
+        error_data: JsonValue,
+    },
+
+    /// An internal error from user task code.
+    ///
+    /// This is the catch-all variant for errors propagated via `?` on anyhow errors.
+    /// For structured user errors, prefer using [`TaskError::user()`].
     #[error(transparent)]
     TaskInternal(#[from] anyhow::Error),
 }
@@ -117,6 +129,42 @@ pub enum TaskError {
 ///
 /// Use this as the return type for [`Task::run`](crate::Task::run) implementations.
 pub type TaskResult<T> = Result<T, TaskError>;
+
+impl TaskError {
+    /// Create a user error from arbitrary JSON data.
+    ///
+    /// If the JSON is an object with a "message" field, that's used for display.
+    /// Otherwise, the JSON is stringified for the display message.
+    ///
+    /// ```ignore
+    /// // With structured data
+    /// Err(TaskError::user(json!({"message": "Not found", "code": 404})))
+    ///
+    /// // With any serializable type
+    /// Err(TaskError::user(MyError { code: 404, details: "..." }))
+    /// ```
+    pub fn user(error_data: impl serde::Serialize) -> Self {
+        let error_data = serde_json::to_value(&error_data).unwrap_or(serde_json::Value::Null);
+        let message = error_data
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| error_data.to_string());
+        TaskError::User {
+            message,
+            error_data,
+        }
+    }
+
+    /// Create a user error from just a message string.
+    pub fn user_message(message: impl Into<String>) -> Self {
+        let message = message.into();
+        TaskError::User {
+            error_data: serde_json::Value::String(message.clone()),
+            message,
+        }
+    }
+}
 
 impl From<serde_json::Error> for TaskError {
     fn from(err: serde_json::Error) -> Self {
@@ -190,6 +238,16 @@ pub fn serialize_task_error(err: &TaskError) -> JsonValue {
             serde_json::json!({
                 "name": "Validation",
                 "message": message,
+            })
+        }
+        TaskError::User {
+            message,
+            error_data,
+        } => {
+            serde_json::json!({
+                "name": "User",
+                "message": message,
+                "error_data": error_data,
             })
         }
         TaskError::TaskInternal(e) => {

@@ -147,6 +147,23 @@ impl Task for MyTask {
 }
 ```
 
+### User Errors
+
+Return user errors with structured data using `TaskError::user()`:
+
+```rust
+// With structured data (message extracted from "message" field if present)
+Err(TaskError::user(json!({"message": "Not found", "code": 404})))
+
+// With any serializable type
+Err(TaskError::user(MyError { code: 404, details: "..." }))
+
+// Simple string message
+Err(TaskError::user_message("Something went wrong"))
+```
+
+The error data is serialized to JSON and stored in the database for debugging and analysis.
+
 ### TaskContext
 
 The [`TaskContext`] provides methods for durable execution:
@@ -287,7 +304,9 @@ This is useful when you need to guarantee that a task is only enqueued if relate
 | [`Task`] | Trait for defining task types |
 | [`TaskContext`] | Context passed to task execution |
 | [`TaskResult<T>`] | Result type alias for task returns |
-| [`TaskError`] | Error type with control flow signals |
+| [`TaskError`] | Error type with control flow signals and user errors |
+| [`TaskError::user()`] | Helper to create user errors with JSON data |
+| [`TaskError::user_message()`] | Helper to create string user errors |
 | [`TaskHandle<T>`] | Handle to a spawned subtask (returned by `ctx.spawn()`) |
 
 ### Configuration
