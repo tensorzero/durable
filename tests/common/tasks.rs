@@ -1,8 +1,25 @@
 use durable::{SpawnOptions, Task, TaskContext, TaskError, TaskHandle, TaskResult, async_trait};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+// ============================================================================
+// Simple error type for tests
+// ============================================================================
+
+/// Simple string-based error for test tasks
+#[derive(Debug, Clone, Serialize)]
+pub struct TestError(pub String);
+
+impl fmt::Display for TestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for TestError {}
 
 // ============================================================================
 // ResearchTask - Example from README demonstrating multi-step checkpointing
@@ -31,6 +48,7 @@ impl Task<()> for ResearchTask {
     }
     type Params = ResearchParams;
     type Output = ResearchResult;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -92,6 +110,7 @@ impl Task<()> for EchoTask {
     }
     type Params = EchoParams;
     type Output = String;
+    type Error = TestError;
 
     async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok(params.message)
@@ -118,12 +137,10 @@ impl Task<()> for FailingTask {
     }
     type Params = FailingParams;
     type Output = ();
+    type Error = TestError;
 
     async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
-        Err(TaskError::TaskInternal(anyhow::anyhow!(
-            "{}",
-            params.error_message
-        )))
+        Err(TaskError::user_message(format!("{}", params.error_message)))
     }
 }
 
@@ -149,6 +166,7 @@ impl Task<()> for MultiStepTask {
     }
     type Params = ();
     type Output = MultiStepOutput;
+    type Error = TestError;
 
     async fn run(
         _params: Self::Params,
@@ -186,6 +204,7 @@ impl Task<()> for SleepingTask {
     }
     type Params = SleepParams;
     type Output = String;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -219,6 +238,7 @@ impl Task<()> for EventWaitingTask {
     }
     type Params = EventWaitParams;
     type Output = serde_json::Value;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -270,6 +290,7 @@ impl Task<()> for StepCountingTask {
     }
     type Params = StepCountingParams;
     type Output = StepCountingOutput;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -290,9 +311,7 @@ impl Task<()> for StepCountingTask {
             .await?;
 
         if params.fail_after_step2 {
-            return Err(TaskError::TaskInternal(anyhow::anyhow!(
-                "Intentional failure after step2"
-            )));
+            return Err(TaskError::user_message(format!("Intentional failure after step2")));
         }
 
         let step3_value: String = ctx
@@ -323,6 +342,7 @@ impl Task<()> for EmptyParamsTask {
     }
     type Params = ();
     type Output = String;
+    type Error = TestError;
 
     async fn run(_params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok("completed".to_string())
@@ -349,6 +369,7 @@ impl Task<()> for HeartbeatTask {
     }
     type Params = HeartbeatParams;
     type Output = u32;
+    type Error = TestError;
 
     async fn run(params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         for _i in 0..params.iterations {
@@ -383,6 +404,7 @@ impl Task<()> for ConvenienceMethodsTask {
     }
     type Params = ();
     type Output = ConvenienceMethodsOutput;
+    type Error = TestError;
 
     async fn run(
         _params: Self::Params,
@@ -424,6 +446,7 @@ impl Task<()> for MultipleConvenienceCallsTask {
     }
     type Params = ();
     type Output = MultipleCallsOutput;
+    type Error = TestError;
 
     async fn run(
         _params: Self::Params,
@@ -458,6 +481,7 @@ impl Task<()> for ReservedPrefixTask {
     }
     type Params = ();
     type Output = ();
+    type Error = TestError;
 
     async fn run(
         _params: Self::Params,
@@ -493,6 +517,7 @@ impl Task<()> for DoubleTask {
     }
     type Params = DoubleParams;
     type Output = i32;
+    type Error = TestError;
 
     async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok(params.value * 2)
@@ -510,11 +535,10 @@ impl Task<()> for FailingChildTask {
     }
     type Params = ();
     type Output = ();
+    type Error = TestError;
 
     async fn run(_params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
-        Err(TaskError::TaskInternal(anyhow::anyhow!(
-            "Child task failed intentionally"
-        )))
+        Err(TaskError::user_message(format!("Child task failed intentionally")))
     }
 }
 
@@ -545,6 +569,7 @@ impl Task<()> for SingleSpawnTask {
     }
     type Params = SingleSpawnParams;
     type Output = SingleSpawnOutput;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -592,6 +617,7 @@ impl Task<()> for MultiSpawnTask {
     }
     type Params = MultiSpawnParams;
     type Output = MultiSpawnOutput;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -633,6 +659,7 @@ impl Task<()> for SpawnFailingChildTask {
     }
     type Params = ();
     type Output = ();
+    type Error = TestError;
 
     async fn run(
         _params: Self::Params,
@@ -679,6 +706,7 @@ impl Task<()> for LongRunningHeartbeatTask {
     }
     type Params = LongRunningHeartbeatParams;
     type Output = String;
+    type Error = TestError;
 
     async fn run(params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         let start = std::time::Instant::now();
@@ -711,6 +739,7 @@ impl Task<()> for SlowChildTask {
     }
     type Params = SlowChildParams;
     type Output = String;
+    type Error = TestError;
 
     async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         tokio::time::sleep(std::time::Duration::from_millis(params.sleep_ms)).await;
@@ -735,6 +764,7 @@ impl Task<()> for SpawnSlowChildTask {
     }
     type Params = SpawnSlowChildParams;
     type Output = String;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -779,6 +809,7 @@ impl Task<()> for EventEmitterTask {
     }
     type Params = EventEmitterParams;
     type Output = String;
+    type Error = TestError;
 
     async fn run(params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         ctx.emit_event(&params.event_name, &params.payload).await?;
@@ -806,6 +837,7 @@ impl Task<()> for ManyStepsTask {
     }
     type Params = ManyStepsParams;
     type Output = u32;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -842,6 +874,7 @@ impl Task<()> for LargePayloadTask {
     }
     type Params = LargePayloadParams;
     type Output = String;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -879,6 +912,7 @@ impl Task<()> for CpuBoundTask {
     }
     type Params = CpuBoundParams;
     type Output = String;
+    type Error = TestError;
 
     async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         let start = std::time::Instant::now();
@@ -915,6 +949,7 @@ impl Task<()> for SlowNoHeartbeatTask {
     }
     type Params = SlowNoHeartbeatParams;
     type Output = String;
+    type Error = TestError;
 
     async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         // Just sleep - no heartbeat calls
@@ -1008,6 +1043,7 @@ impl Task<()> for DeterministicReplayTask {
     }
     type Params = DeterministicReplayParams;
     type Output = DeterministicReplayOutput;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -1031,9 +1067,7 @@ impl Task<()> for DeterministicReplayTask {
             });
 
             if should_fail {
-                return Err(TaskError::TaskInternal(anyhow::anyhow!(
-                    "First attempt failure"
-                )));
+                return Err(TaskError::user_message(format!("First attempt failure")));
             }
         }
 
@@ -1074,6 +1108,7 @@ impl Task<()> for EventThenFailTask {
     }
     type Params = EventThenFailParams;
     type Output = serde_json::Value;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -1095,9 +1130,7 @@ impl Task<()> for EventThenFailTask {
         });
 
         if should_fail {
-            return Err(TaskError::TaskInternal(anyhow::anyhow!(
-                "First attempt failure after event"
-            )));
+            return Err(TaskError::user_message(format!("First attempt failure after event")));
         }
 
         // Second attempt succeeds with the same payload (from checkpoint)
@@ -1126,6 +1159,7 @@ impl Task<()> for EventThenDelayTask {
     }
     type Params = EventThenDelayParams;
     type Output = serde_json::Value;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -1165,6 +1199,7 @@ impl Task<()> for MultiEventTask {
     }
     type Params = MultiEventParams;
     type Output = serde_json::Value;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -1210,6 +1245,7 @@ impl Task<()> for SpawnThenFailTask {
     }
     type Params = SpawnThenFailParams;
     type Output = serde_json::Value;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -1241,9 +1277,7 @@ impl Task<()> for SpawnThenFailTask {
         });
 
         if should_fail {
-            return Err(TaskError::TaskInternal(anyhow::anyhow!(
-                "First attempt failure after spawn"
-            )));
+            return Err(TaskError::user_message(format!("First attempt failure after spawn")));
         }
 
         // Second attempt - join child
@@ -1282,6 +1316,7 @@ impl Task<()> for SpawnByNameTask {
     }
     type Params = SpawnByNameParams;
     type Output = SpawnByNameOutput;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -1325,6 +1360,7 @@ impl Task<()> for JoinCancelledChildTask {
     }
     type Params = JoinCancelledChildParams;
     type Output = String;
+    type Error = TestError;
 
     async fn run(
         params: Self::Params,
@@ -1371,6 +1407,7 @@ impl Task<()> for VerySlowChildTask {
     }
     type Params = VerySlowChildParams;
     type Output = String;
+    type Error = TestError;
 
     async fn run(params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         // Heartbeat regularly to keep this task alive

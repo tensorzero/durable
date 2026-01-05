@@ -56,6 +56,15 @@ struct ResearchResult {
     sources: Vec<String>,
 }
 
+// Define a typed error for your task
+#[derive(Debug, Serialize, thiserror::Error)]
+enum ResearchError {
+    #[error("No sources found for query")]
+    NoSources,
+    #[error("Analysis failed: {0}")]
+    AnalysisFailed(String),
+}
+
 // Implement the Task trait
 struct ResearchTask;
 
@@ -64,6 +73,7 @@ impl Task for ResearchTask {
     fn name() -> Cow<'static, str> { Cow::Borrowed("research") }
     type Params = ResearchParams;
     type Output = ResearchResult;
+    type Error = ResearchError;
 
     async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
         // Phase 1: Find relevant sources (checkpointed)
@@ -140,12 +150,48 @@ impl Task for MyTask {
     fn name() -> Cow<'static, str> { Cow::Borrowed("my-task") }  // Unique identifier
     type Params = MyParams;                                       // Input (JSON-serializable)
     type Output = MyOutput;                                       // Output (JSON-serializable)
+    type Error = MyError;                                         // Error type (see below)
 
     async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
         // Your task logic here
     }
 }
 ```
+
+### Error Types
+
+Tasks declare an error type via `type Error`. This enables structured error reporting:
+
+```rust
+#[derive(Debug, Serialize, thiserror::Error)]
+enum MyError {
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+    #[error("External service failed")]
+    ServiceError,
+}
+
+impl Task for MyTask {
+    type Error = MyError;
+    // ...
+
+    async fn run(params: Self::Params, mut ctx: TaskContext) -> TaskResult<Self::Output> {
+        // Return typed errors using TaskError::user()
+        if params.value < 0 {
+            return Err(TaskError::user(MyError::InvalidInput("negative value".into())));
+        }
+
+        // Or simple string errors
+        if something_wrong {
+            return Err(TaskError::user_message("Something went wrong"));
+        }
+
+        Ok(result)
+    }
+}
+```
+
+The `TaskError::user()` helper serializes your error type to JSON for storage in the database, enabling structured error analysis and debugging.
 
 ### TaskContext
 
@@ -287,7 +333,9 @@ This is useful when you need to guarantee that a task is only enqueued if relate
 | [`Task`] | Trait for defining task types |
 | [`TaskContext`] | Context passed to task execution |
 | [`TaskResult<T>`] | Result type alias for task returns |
-| [`TaskError`] | Error type with control flow signals |
+| [`TaskError`] | Error type with control flow signals and user errors |
+| [`TaskError::user()`] | Helper to create typed user errors |
+| [`TaskError::user_message()`] | Helper to create string user errors |
 | [`TaskHandle<T>`] | Handle to a spawned subtask (returned by `ctx.spawn()`) |
 
 ### Configuration
