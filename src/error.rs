@@ -144,8 +144,7 @@ impl TaskError {
     /// Err(TaskError::user(MyError { code: 404, details: "..." }))
     /// ```
     pub fn user(error_data: impl serde::Serialize) -> Self {
-        let error_data =
-            serde_json::to_value(&error_data).unwrap_or(serde_json::Value::Null);
+        let error_data = serde_json::to_value(&error_data).unwrap_or(serde_json::Value::Null);
         let message = error_data
             .get("message")
             .and_then(|v| v.as_str())
