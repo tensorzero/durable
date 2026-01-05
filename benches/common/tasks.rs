@@ -16,6 +16,7 @@ impl Task<()> for NoOpTask {
     }
     type Params = ();
     type Output = ();
+    type Error = std::convert::Infallible;
 
     async fn run(_params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok(())
@@ -42,6 +43,7 @@ impl Task<()> for QuickTask {
     }
     type Params = QuickParams;
     type Output = u32;
+    type Error = std::convert::Infallible;
 
     async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok(params.task_num)
@@ -68,6 +70,7 @@ impl Task<()> for MultiStepBenchTask {
     }
     type Params = MultiStepParams;
     type Output = u32;
+    type Error = std::convert::Infallible;
 
     async fn run(
         params: Self::Params,
@@ -103,6 +106,7 @@ impl Task<()> for LargePayloadBenchTask {
     }
     type Params = LargePayloadParams;
     type Output = usize;
+    type Error = std::convert::Infallible;
 
     async fn run(
         params: Self::Params,

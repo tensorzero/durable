@@ -146,7 +146,10 @@ impl TaskError {
         let message = err.to_string();
         let error_data = serde_json::to_value(&err)
             .unwrap_or_else(|_| serde_json::Value::String(message.clone()));
-        TaskError::User { message, error_data }
+        TaskError::User {
+            message,
+            error_data,
+        }
     }
 
     /// Create a user error from just a message string.
@@ -233,7 +236,10 @@ pub fn serialize_task_error(err: &TaskError) -> JsonValue {
                 "message": message,
             })
         }
-        TaskError::User { message, error_data } => {
+        TaskError::User {
+            message,
+            error_data,
+        } => {
             serde_json::json!({
                 "name": "User",
                 "message": message,

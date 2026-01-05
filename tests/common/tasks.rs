@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 // ============================================================================
 
 /// Simple string-based error for test tasks
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 pub struct TestError(pub String);
 
@@ -140,7 +141,7 @@ impl Task<()> for FailingTask {
     type Error = TestError;
 
     async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
-        Err(TaskError::user_message(format!("{}", params.error_message)))
+        Err(TaskError::user_message(params.error_message.to_string()))
     }
 }
 
@@ -311,7 +312,9 @@ impl Task<()> for StepCountingTask {
             .await?;
 
         if params.fail_after_step2 {
-            return Err(TaskError::user_message(format!("Intentional failure after step2")));
+            return Err(TaskError::user_message(
+                "Intentional failure after step2".to_string(),
+            ));
         }
 
         let step3_value: String = ctx
@@ -538,7 +541,9 @@ impl Task<()> for FailingChildTask {
     type Error = TestError;
 
     async fn run(_params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
-        Err(TaskError::user_message(format!("Child task failed intentionally")))
+        Err(TaskError::user_message(
+            "Child task failed intentionally".to_string(),
+        ))
     }
 }
 
@@ -1067,7 +1072,7 @@ impl Task<()> for DeterministicReplayTask {
             });
 
             if should_fail {
-                return Err(TaskError::user_message(format!("First attempt failure")));
+                return Err(TaskError::user_message("First attempt failure".to_string()));
             }
         }
 
@@ -1130,7 +1135,9 @@ impl Task<()> for EventThenFailTask {
         });
 
         if should_fail {
-            return Err(TaskError::user_message(format!("First attempt failure after event")));
+            return Err(TaskError::user_message(
+                "First attempt failure after event".to_string(),
+            ));
         }
 
         // Second attempt succeeds with the same payload (from checkpoint)
@@ -1277,7 +1284,9 @@ impl Task<()> for SpawnThenFailTask {
         });
 
         if should_fail {
-            return Err(TaskError::user_message(format!("First attempt failure after spawn")));
+            return Err(TaskError::user_message(
+                "First attempt failure after spawn".to_string(),
+            ));
         }
 
         // Second attempt - join child
