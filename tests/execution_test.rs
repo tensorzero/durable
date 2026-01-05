@@ -730,18 +730,6 @@ struct WriteToDbParams {
     value: String,
 }
 
-/// Simple error type for WriteToDbTask
-#[derive(Debug, serde::Serialize)]
-struct WriteToDbError(String);
-
-impl std::fmt::Display for WriteToDbError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for WriteToDbError {}
-
 #[durable::async_trait]
 impl durable::Task<AppState> for WriteToDbTask {
     fn name() -> Cow<'static, str> {
@@ -749,7 +737,6 @@ impl durable::Task<AppState> for WriteToDbTask {
     }
     type Params = WriteToDbParams;
     type Output = i64;
-    type Error = WriteToDbError;
 
     async fn run(
         params: Self::Params,

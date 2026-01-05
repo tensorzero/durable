@@ -105,22 +105,22 @@ pub enum TaskError {
         message: String,
     },
 
-    /// A typed error from user task code.
+    /// A user error from task code.
     ///
     /// This variant stores a serialized user error for persistence and retrieval.
-    /// Created automatically when a task returns its custom `Error` type.
+    /// Created via [`TaskError::user()`] or [`TaskError::user_message()`].
     #[error("{message}")]
     User {
-        /// The error message (from Display impl)
+        /// The error message (extracted from "message" field or stringified data)
         message: String,
         /// Serialized error data for storage/retrieval
         error_data: JsonValue,
     },
 
-    /// An untyped error from user task code.
+    /// An internal error from user task code.
     ///
-    /// This is the catch-all variant for errors returned by task implementations
-    /// that use `anyhow::Error` as their error type.
+    /// This is the catch-all variant for errors propagated via `?` on anyhow errors.
+    /// For structured user errors, prefer using [`TaskError::user()`].
     #[error(transparent)]
     TaskInternal(#[from] anyhow::Error),
 }
@@ -131,21 +131,26 @@ pub enum TaskError {
 pub type TaskResult<T> = Result<T, TaskError>;
 
 impl TaskError {
-    /// Create a user error with a message and optional structured data.
+    /// Create a user error from arbitrary JSON data.
     ///
-    /// Use this to return typed errors from your task:
+    /// If the JSON is an object with a "message" field, that's used for display.
+    /// Otherwise, the JSON is stringified for the display message.
     ///
     /// ```ignore
-    /// #[derive(Debug, Serialize)]
-    /// struct MyError { code: i32, details: String }
+    /// // With structured data
+    /// Err(TaskError::user(json!({"message": "Not found", "code": 404})))
     ///
-    /// // In your task:
-    /// Err(TaskError::user(MyError { code: 404, details: "Not found".into() }))
+    /// // With any serializable type
+    /// Err(TaskError::user(MyError { code: 404, details: "..." }))
     /// ```
-    pub fn user<E: std::error::Error + serde::Serialize>(err: E) -> Self {
-        let message = err.to_string();
-        let error_data = serde_json::to_value(&err)
-            .unwrap_or_else(|_| serde_json::Value::String(message.clone()));
+    pub fn user(error_data: impl serde::Serialize) -> Self {
+        let error_data =
+            serde_json::to_value(&error_data).unwrap_or(serde_json::Value::Null);
+        let message = error_data
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| error_data.to_string());
         TaskError::User {
             message,
             error_data,

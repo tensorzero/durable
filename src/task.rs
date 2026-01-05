@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value as JsonValue;
 use std::borrow::Cow;
-use std::error::Error;
 use std::marker::PhantomData;
 
 use crate::context::TaskContext;
@@ -29,7 +28,6 @@ use crate::error::{TaskError, TaskResult};
 ///     fn name() -> Cow<'static, str> { Cow::Borrowed("send-email") }
 ///     type Params = SendEmailParams;
 ///     type Output = SendEmailResult;
-///     type Error = anyhow::Error;  // For documentation; actual return is TaskResult
 ///
 ///     async fn run(params: Self::Params, mut ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
 ///         let result = ctx.step("send", || async {
@@ -40,18 +38,10 @@ use crate::error::{TaskError, TaskResult};
 ///     }
 /// }
 ///
-/// // With application state and typed errors:
+/// // With application state:
 /// #[derive(Clone)]
 /// struct AppState {
 ///     http_client: reqwest::Client,
-/// }
-///
-/// #[derive(Debug, Clone, Serialize, thiserror::Error)]
-/// pub enum FetchError {
-///     #[error("HTTP error: {0}")]
-///     Http(String),
-///     #[error("Invalid URL: {0}")]
-///     InvalidUrl(String),
 /// }
 ///
 /// struct FetchUrlTask;
@@ -61,7 +51,6 @@ use crate::error::{TaskError, TaskResult};
 ///     fn name() -> Cow<'static, str> { Cow::Borrowed("fetch-url") }
 ///     type Params = String;
 ///     type Output = String;
-///     type Error = FetchError;
 ///
 ///     async fn run(url: Self::Params, mut ctx: TaskContext, state: AppState) -> TaskResult<Self::Output> {
 ///         let body = ctx.step("fetch", || async {
@@ -89,22 +78,15 @@ where
     /// Output type (must be JSON-serializable)
     type Output: Serialize + DeserializeOwned + Send;
 
-    /// Error type for this task.
-    ///
-    /// Use a custom enum with `#[derive(Serialize, thiserror::Error)]` for typed errors
-    /// that will be stored as structured JSON in the database.
-    ///
-    /// Note: Tasks still return `TaskResult<Self::Output>` to preserve control flow
-    /// (suspend, cancel). Use `TaskError::user(your_error)` to wrap your typed errors.
-    type Error: Error + Send + 'static;
-
     /// Execute the task logic.
     ///
     /// Return `Ok(output)` on success, or `Err(TaskError)` on failure.
     /// Use `?` freely - errors will propagate and the task will be retried
     /// according to its [`RetryStrategy`](crate::RetryStrategy).
     ///
-    /// To return a typed error, use `TaskError::user(your_error)`.
+    /// For user errors with structured data, use `TaskError::user(data)` where
+    /// data is any serializable value. For simple message errors, use
+    /// `TaskError::user_message("message")`.
     ///
     /// The [`TaskContext`] provides methods for checkpointing, sleeping,
     /// and waiting for events. See [`TaskContext`] for details.

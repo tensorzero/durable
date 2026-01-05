@@ -19,11 +19,6 @@
 //! #[derive(Serialize, Deserialize)]
 //! struct MyOutput { result: i32 }
 //!
-//! // Simple error type for the task
-//! #[derive(Debug, Serialize, thiserror::Error)]
-//! #[error("{0}")]
-//! struct MyError(String);
-//!
 //! struct MyTask;
 //!
 //! #[async_trait]
@@ -31,7 +26,6 @@
 //!     fn name() -> Cow<'static, str> { Cow::Borrowed("my-task") }
 //!     type Params = MyParams;
 //!     type Output = MyOutput;
-//!     type Error = MyError;
 //!
 //!     async fn run(params: Self::Params, mut ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
 //!         let doubled = ctx.step("double", || async {
@@ -67,10 +61,6 @@
 //!     http_client: reqwest::Client,
 //! }
 //!
-//! #[derive(Debug, Serialize, thiserror::Error)]
-//! #[error("{0}")]
-//! struct FetchError(String);
-//!
 //! struct FetchTask;
 //!
 //! #[async_trait]
@@ -78,7 +68,6 @@
 //!     fn name() -> Cow<'static, str> { Cow::Borrowed("fetch") }
 //!     type Params = String;
 //!     type Output = String;
-//!     type Error = FetchError;
 //!
 //!     async fn run(url: Self::Params, mut ctx: TaskContext, state: AppState) -> TaskResult<Self::Output> {
 //!         ctx.step("fetch", || async {
