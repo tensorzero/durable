@@ -292,7 +292,9 @@ impl Worker {
         if let Some(ref headers) = task.headers {
             use tracing_opentelemetry::OpenTelemetrySpanExt;
             let parent_cx = crate::telemetry::extract_trace_context(headers);
-            span.set_parent(parent_cx);
+            if let Err(e) = span.set_parent(parent_cx) {
+                tracing::error!("Failed to update OpenTelemetry span {e:?}");
+            }
         }
 
         Self::execute_task_inner(
