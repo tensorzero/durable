@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{RwLock, Semaphore, broadcast, mpsc};
 use tokio::time::{Instant, sleep, sleep_until};
-use tracing::Instrument;
+use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 use crate::context::TaskContext;
@@ -380,9 +380,11 @@ impl Worker {
         drop(registry);
 
         // Execute task with timeout enforcement
+        // We instrument the actual task execution itself, to continue the trace context
+        // all the way through to the individual task steps
         let task_handle = tokio::spawn({
             let params = task.params.clone();
-            async move { handler.execute(params, ctx, state).await }
+            (async move { handler.execute(params, ctx, state).await }).instrument(Span::current())
         });
         let abort_handle = task_handle.abort_handle();
 
