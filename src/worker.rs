@@ -285,6 +285,8 @@ impl Worker {
             run_id = %task.run_id,
             task_name = %task.task_name,
             attempt = task.attempt,
+            // This makes things render nicely on AWS X-Ray when propagating trace contexts.
+            otel.kind = "server",
         );
 
         // Extract and set parent trace context from headers (for distributed tracing)
