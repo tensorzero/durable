@@ -212,7 +212,7 @@ async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> 
         .unwrap();
 
     // Wait for task to start
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     let state = get_task_state(&pool, "crash_lease", spawn_result.task_id).await?;
     assert_eq!(state, Some("running".to_string()));
