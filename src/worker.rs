@@ -287,14 +287,16 @@ impl Worker {
             attempt = task.attempt,
         );
 
-        // Extract and set parent trace context from headers (for distributed tracing)
+        // Extract and add a trace link to the context from headers (for distributed tracing)
+        // We don't set the parent, since a task can be executed multiple times
+        // long after the original span from headers (e.g. an autopilot-api HTTP request)
+        // finishes.
         #[cfg(feature = "telemetry")]
         if let Some(ref headers) = task.headers {
+            use opentelemetry::trace::TraceContextExt;
             use tracing_opentelemetry::OpenTelemetrySpanExt;
             let parent_cx = crate::telemetry::extract_trace_context(headers);
-            if let Err(e) = span.set_parent(parent_cx) {
-                tracing::error!("Failed to update OpenTelemetry span {e:?}");
-            }
+            span.add_link(parent_cx.span().span_context().clone());
         }
 
         Self::execute_task_inner(
