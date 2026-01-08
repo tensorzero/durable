@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1767818209655,
+  "lastUpdate": 1767886509486,
   "repoUrl": "https://github.com/tensorzero/durable",
   "entries": {
     "Criterion Benchmark": [
@@ -1499,6 +1499,156 @@ window.BENCHMARK_DATA = {
             "name": "e2e_completion/single_task_roundtrip",
             "value": 15844783,
             "range": "± 573369",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "aaron@tensorzero.com",
+            "name": "Aaron Hill",
+            "username": "Aaron1011"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "12f5773d957db49902ca6fdbe7b0a4688a0d9a5d",
+          "message": "Create an OpenTelemetry link instead of setting parent (#53)\n\nThe opentelemetry docs specifically call out our use-case\n(queueing an asynchronous task) as a use case for links:\nhttps://opentelemetry.io/docs/concepts/signals/traces/#span-links",
+          "timestamp": "2026-01-08T14:59:43Z",
+          "tree_id": "4bd17742ed51828f683b398a48ae8cd478b7cb55",
+          "url": "https://github.com/tensorzero/durable/commit/12f5773d957db49902ca6fdbe7b0a4688a0d9a5d"
+        },
+        "date": 1767886508932,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "step_cache_miss/steps/10",
+            "value": 45960790,
+            "range": "± 696795",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/50",
+            "value": 82649225,
+            "range": "± 1684963",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/100",
+            "value": 136398320,
+            "range": "± 532677",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/10",
+            "value": 12780657,
+            "range": "± 703475",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/50",
+            "value": 15564643,
+            "range": "± 1074920",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/100",
+            "value": 13178738,
+            "range": "± 1166925",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1",
+            "value": 31220427,
+            "range": "± 650036",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/100",
+            "value": 24788695,
+            "range": "± 451552",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1000",
+            "value": 72598398,
+            "range": "± 5363214",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/2",
+            "value": 649379687,
+            "range": "± 13430107",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/4",
+            "value": 423331420,
+            "range": "± 9777842",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/8",
+            "value": 375065727,
+            "range": "± 4796089",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/16",
+            "value": 386216482,
+            "range": "± 6850939",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/baseline",
+            "value": 160229960,
+            "range": "± 5095035",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/contention",
+            "value": 116097732,
+            "range": "± 4912235",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "spawn_latency/single_spawn",
+            "value": 929985,
+            "range": "± 676929",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/1",
+            "value": 598293819,
+            "range": "± 9947296",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/2",
+            "value": 371628364,
+            "range": "± 3872031",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/4",
+            "value": 255871127,
+            "range": "± 2495240",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/8",
+            "value": 200056044,
+            "range": "± 2904504",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "e2e_completion/single_task_roundtrip",
+            "value": 15837995,
+            "range": "± 634601",
             "unit": "ns/iter"
           }
         ]
