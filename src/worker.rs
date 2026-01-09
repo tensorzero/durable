@@ -220,6 +220,7 @@ impl Worker {
     #[cfg_attr(
         feature = "telemetry",
         tracing::instrument(
+            level = "debug",
             name = "durable.worker.claim_tasks",
             skip(pool),
             fields(queue = %queue_name, worker_id = %worker_id, count = count)
