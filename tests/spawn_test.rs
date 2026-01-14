@@ -353,7 +353,8 @@ async fn test_spawn_with_complex_params(pool: PgPool) -> sqlx::Result<()> {
     client.register::<EchoTask>().await.unwrap();
 
     // Complex nested JSON structure - the params don't need to match the task's Params type
-    // because spawn_by_name accepts arbitrary JSON
+    // because spawn_by_name_unchecked does not validate the JSON
+    // (unlike `spawn_by_name`)
     let params = serde_json::json!({
         "nested": {
             "array": [1, 2, 3],
@@ -368,7 +369,7 @@ async fn test_spawn_with_complex_params(pool: PgPool) -> sqlx::Result<()> {
     });
 
     let result = client
-        .spawn_by_name("echo", params, SpawnOptions::default())
+        .spawn_by_name_unchecked("echo", params, SpawnOptions::default())
         .await
         .expect("Failed to spawn task with complex params");
 
