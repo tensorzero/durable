@@ -342,17 +342,7 @@ where
         params: JsonValue,
         options: SpawnOptions,
     ) -> DurableResult<SpawnResult> {
-        // Validate that the task is registered
-        {
-            let registry = self.registry.read().await;
-            if !registry.contains_key(task_name) {
-                return Err(DurableError::TaskNotRegistered {
-                    task_name: task_name.to_string(),
-                });
-            }
-        }
-
-        self.spawn_by_name_internal(&self.pool, task_name, params, options)
+        self.spawn_by_name_with(&self.pool, task_name, params, options)
             .await
     }
 
@@ -432,11 +422,16 @@ where
         // Validate that the task is registered
         {
             let registry = self.registry.read().await;
-            if !registry.contains_key(task_name) {
+            let Some(task) = registry.get(task_name) else {
                 return Err(DurableError::TaskNotRegistered {
                     task_name: task_name.to_string(),
                 });
-            }
+            };
+            task.validate_params(params.clone())
+                .map_err(|e| DurableError::InvalidTaskParams {
+                    task_name: task_name.to_string(),
+                    message: e.to_string(),
+                })?;
         }
 
         self.spawn_by_name_internal(executor, task_name, params, options)

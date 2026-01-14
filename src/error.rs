@@ -311,6 +311,18 @@ pub enum DurableError {
         task_name: String,
     },
 
+    //// Task params validation failed.
+    ///
+    /// Returned when the task definition in the registry fails to validate the params
+    /// (before we attempt to spawn the task in Postgres).
+    #[error("invalid task parameters for '{task_name}': {message}")]
+    InvalidTaskParams {
+        /// The name of the task being spawned
+        task_name: String,
+        /// The error message from the task.
+        message: String,
+    },
+
     /// Header key uses a reserved prefix.
     ///
     /// User-provided headers cannot start with "durable::" as this prefix

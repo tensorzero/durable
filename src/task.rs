@@ -109,6 +109,8 @@ where
     State: Clone + Send + Sync + 'static,
 {
     fn name(&self) -> Cow<'static, str>;
+    /// Called before spawning, to check that the `params` are valid for this task.
+    fn validate_params(&self, params: JsonValue) -> Result<(), TaskError>;
     async fn execute(
         &self,
         params: JsonValue,
@@ -125,6 +127,12 @@ where
 {
     fn name(&self) -> Cow<'static, str> {
         T::name()
+    }
+
+    fn validate_params(&self, params: JsonValue) -> Result<(), TaskError> {
+        // For now, just deserialize
+        let _typed_params: T::Params = serde_json::from_value(params)?;
+        Ok(())
     }
 
     async fn execute(

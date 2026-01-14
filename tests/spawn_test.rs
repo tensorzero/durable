@@ -3,7 +3,7 @@
 mod common;
 
 use common::tasks::{EchoParams, EchoTask, FailingParams, FailingTask};
-use durable::{CancellationPolicy, Durable, MIGRATOR, RetryStrategy, SpawnOptions};
+use durable::{CancellationPolicy, Durable, DurableError, MIGRATOR, RetryStrategy, SpawnOptions};
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -266,6 +266,33 @@ async fn test_spawn_by_name(pool: PgPool) -> sqlx::Result<()> {
         .expect("Failed to spawn task by name");
 
     assert_eq!(result.attempt, 1);
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_spawn_by_name_invalid_params(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "spawn_by_name").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<EchoTask>().await.unwrap();
+
+    let params = serde_json::json!({
+        "message": 12345
+    });
+
+    let result = client
+        .spawn_by_name("echo", params, SpawnOptions::default())
+        .await
+        .expect_err("Spawning task by name with invalid params should fail");
+
+    let DurableError::InvalidTaskParams { task_name, message } = result else {
+        panic!("Unexpected error: {}", result);
+    };
+    assert_eq!(task_name, "echo");
+    assert_eq!(
+        message,
+        "serialization error: invalid type: integer `12345`, expected a string"
+    );
 
     Ok(())
 }
