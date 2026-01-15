@@ -335,9 +335,10 @@ async fn test_spawn_with_empty_params(pool: PgPool) -> sqlx::Result<()> {
     client.create_queue(None).await.unwrap();
     client.register::<EchoTask>().await.unwrap();
 
-    // Empty object is valid JSON params for EchoTask (message will be missing but that's ok for this test)
+    // Empty object is not valid JSON params for EchoTask,
+    // but spawn_by_name_unchecked does not validate the JSON
     let result = client
-        .spawn_by_name("echo", serde_json::json!({}), SpawnOptions::default())
+        .spawn_by_name_unchecked("echo", serde_json::json!({}), SpawnOptions::default())
         .await
         .expect("Failed to spawn task with empty params");
 
