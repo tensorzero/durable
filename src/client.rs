@@ -2,14 +2,13 @@ use serde::Serialize;
 use serde_json::Value as JsonValue;
 use sqlx::{Executor, PgPool, Postgres};
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::error::{DurableError, DurableResult};
-use crate::task::{Task, TaskRegistry};
+use crate::task::{Task, TaskRegistry, TaskWrapper};
 use crate::types::{
     CancellationPolicy, RetryStrategy, SpawnDefaults, SpawnOptions, SpawnResult, SpawnResultRow,
     WorkerOptions,
@@ -305,31 +304,45 @@ where
     /// Register a task type. Required before spawning or processing.
     ///
     /// Returns an error if a task with the same name is already registered.
-    pub async fn register<T: Task<State>>(&self) -> DurableResult<&Self> {
+    pub async fn register<T: Task<State> + Default>(&self) -> DurableResult<&Self> {
+        self.register_instance(T::default()).await
+    }
+
+    /// Register a task instance. Required before spawning or processing.
+    ///
+    /// Use this when you need to register a task with runtime-determined metadata
+    /// (e.g., a TypeScript tool loaded from a config file).
+    ///
+    /// Returns an error if a task with the same name is already registered.
+    pub async fn register_instance<T: Task<State>>(&self, task: T) -> DurableResult<&Self> {
         let mut registry = self.registry.write().await;
-        let name = T::name();
-        if registry.contains_key(&name) {
+        let name = task.name();
+        if registry.contains_key(name.as_ref()) {
             return Err(DurableError::TaskAlreadyRegistered {
                 task_name: name.to_string(),
             });
         }
-        registry.insert(name, &PhantomData::<T>);
+        registry.insert(name, Arc::new(TaskWrapper::new(task)));
         Ok(self)
     }
 
     /// Spawn a task (type-safe version)
-    pub async fn spawn<T: Task<State>>(&self, params: T::Params) -> DurableResult<SpawnResult> {
+    pub async fn spawn<T: Task<State> + Default>(
+        &self,
+        params: T::Params,
+    ) -> DurableResult<SpawnResult> {
         self.spawn_with_options::<T>(params, SpawnOptions::default())
             .await
     }
 
     /// Spawn a task with options (type-safe version)
-    pub async fn spawn_with_options<T: Task<State>>(
+    pub async fn spawn_with_options<T: Task<State> + Default>(
         &self,
         params: T::Params,
         options: SpawnOptions,
     ) -> DurableResult<SpawnResult> {
-        self.spawn_by_name(&T::name(), serde_json::to_value(&params)?, options)
+        let task = T::default();
+        self.spawn_by_name(&task.name(), serde_json::to_value(&params)?, options)
             .await
     }
 
@@ -380,7 +393,7 @@ where
         params: T::Params,
     ) -> DurableResult<SpawnResult>
     where
-        T: Task<State>,
+        T: Task<State> + Default,
         E: Executor<'e, Database = Postgres>,
     {
         self.spawn_with_options_with::<T, E>(executor, params, SpawnOptions::default())
@@ -395,13 +408,13 @@ where
         options: SpawnOptions,
     ) -> DurableResult<SpawnResult>
     where
-        T: Task<State>,
+        T: Task<State> + Default,
         E: Executor<'e, Database = Postgres>,
     {
-        // Type-safe spawn uses T::name() which is already registered
+        let task = T::default();
         self.spawn_by_name_internal(
             executor,
-            &T::name(),
+            &task.name(),
             serde_json::to_value(&params)?,
             options,
         )

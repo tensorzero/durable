@@ -364,7 +364,7 @@ impl Worker {
         // Look up handler
         let registry = registry.read().await;
         let handler = match registry.get(task.task_name.as_str()) {
-            Some(h) => *h,
+            Some(h) => h.clone(),
             None => {
                 tracing::error!("Unknown task: {}", task.task_name);
                 Self::fail_run(

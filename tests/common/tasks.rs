@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct ResearchTask;
 
 #[allow(dead_code)]
@@ -26,13 +27,14 @@ pub struct ResearchResult {
 
 #[async_trait]
 impl Task<()> for ResearchTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("research")
     }
     type Params = ResearchParams;
     type Output = ResearchResult;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -77,6 +79,7 @@ impl Task<()> for ResearchTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct EchoTask;
 
 #[allow(dead_code)]
@@ -87,13 +90,13 @@ pub struct EchoParams {
 
 #[async_trait]
 impl Task<()> for EchoTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("echo")
     }
     type Params = EchoParams;
     type Output = String;
 
-    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(&self, params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok(params.message)
     }
 }
@@ -103,6 +106,7 @@ impl Task<()> for EchoTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct FailingTask;
 
 #[allow(dead_code)]
@@ -113,13 +117,13 @@ pub struct FailingParams {
 
 #[async_trait]
 impl Task<()> for FailingTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("failing")
     }
     type Params = FailingParams;
     type Output = ();
 
-    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(&self, params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Err(TaskError::user_message(params.error_message.to_string()))
     }
 }
@@ -129,6 +133,7 @@ impl Task<()> for FailingTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct MultiStepTask;
 
 #[allow(dead_code)]
@@ -141,13 +146,14 @@ pub struct MultiStepOutput {
 
 #[async_trait]
 impl Task<()> for MultiStepTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("multi-step")
     }
     type Params = ();
     type Output = MultiStepOutput;
 
     async fn run(
+        &self,
         _params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -168,6 +174,7 @@ impl Task<()> for MultiStepTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct SleepingTask;
 
 #[allow(dead_code)]
@@ -178,13 +185,14 @@ pub struct SleepParams {
 
 #[async_trait]
 impl Task<()> for SleepingTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("sleeping")
     }
     type Params = SleepParams;
     type Output = String;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -200,6 +208,7 @@ impl Task<()> for SleepingTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct EventWaitingTask;
 
 #[allow(dead_code)]
@@ -211,13 +220,14 @@ pub struct EventWaitParams {
 
 #[async_trait]
 impl Task<()> for EventWaitingTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("event-waiting")
     }
     type Params = EventWaitParams;
     type Output = serde_json::Value;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -243,6 +253,7 @@ pub struct CountingParams {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct StepCountingTask;
 
 #[allow(dead_code)]
@@ -262,13 +273,14 @@ pub struct StepCountingOutput {
 
 #[async_trait]
 impl Task<()> for StepCountingTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("step-counting")
     }
     type Params = StepCountingParams;
     type Output = StepCountingOutput;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -311,17 +323,18 @@ impl Task<()> for StepCountingTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct EmptyParamsTask;
 
 #[async_trait]
 impl Task<()> for EmptyParamsTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("empty-params")
     }
     type Params = ();
     type Output = String;
 
-    async fn run(_params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(&self, _params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok("completed".to_string())
     }
 }
@@ -331,6 +344,7 @@ impl Task<()> for EmptyParamsTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct HeartbeatTask;
 
 #[allow(dead_code)]
@@ -341,13 +355,13 @@ pub struct HeartbeatParams {
 
 #[async_trait]
 impl Task<()> for HeartbeatTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("heartbeat")
     }
     type Params = HeartbeatParams;
     type Output = u32;
 
-    async fn run(params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(&self, params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         for _i in 0..params.iterations {
             // Simulate work
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -363,6 +377,7 @@ impl Task<()> for HeartbeatTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct ConvenienceMethodsTask;
 
 #[allow(dead_code)]
@@ -375,13 +390,14 @@ pub struct ConvenienceMethodsOutput {
 
 #[async_trait]
 impl Task<()> for ConvenienceMethodsTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("convenience-methods")
     }
     type Params = ();
     type Output = ConvenienceMethodsOutput;
 
     async fn run(
+        &self,
         _params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -403,6 +419,7 @@ impl Task<()> for ConvenienceMethodsTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct MultipleConvenienceCallsTask;
 
 #[allow(dead_code)]
@@ -416,13 +433,14 @@ pub struct MultipleCallsOutput {
 
 #[async_trait]
 impl Task<()> for MultipleConvenienceCallsTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("multiple-convenience-calls")
     }
     type Params = ();
     type Output = MultipleCallsOutput;
 
     async fn run(
+        &self,
         _params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -446,17 +464,19 @@ impl Task<()> for MultipleConvenienceCallsTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct ReservedPrefixTask;
 
 #[async_trait]
 impl Task<()> for ReservedPrefixTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("reserved-prefix")
     }
     type Params = ();
     type Output = ();
 
     async fn run(
+        &self,
         _params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -475,6 +495,7 @@ impl Task<()> for ReservedPrefixTask {
 
 /// Simple child task that doubles a number
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct DoubleTask;
 
 #[allow(dead_code)]
@@ -485,30 +506,31 @@ pub struct DoubleParams {
 
 #[async_trait]
 impl Task<()> for DoubleTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("double")
     }
     type Params = DoubleParams;
     type Output = i32;
 
-    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(&self, params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Ok(params.value * 2)
     }
 }
 
 /// Child task that always fails
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct FailingChildTask;
 
 #[async_trait]
 impl Task<()> for FailingChildTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("failing-child")
     }
     type Params = ();
     type Output = ();
 
-    async fn run(_params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(&self, _params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         Err(TaskError::user_message(
             "Child task failed intentionally".to_string(),
         ))
@@ -521,6 +543,7 @@ impl Task<()> for FailingChildTask {
 
 /// Parent task that spawns a single child and joins it
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct SingleSpawnTask;
 
 #[allow(dead_code)]
@@ -537,13 +560,14 @@ pub struct SingleSpawnOutput {
 
 #[async_trait]
 impl Task<()> for SingleSpawnTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("single-spawn")
     }
     type Params = SingleSpawnParams;
     type Output = SingleSpawnOutput;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -568,6 +592,7 @@ impl Task<()> for SingleSpawnTask {
 
 /// Parent task that spawns multiple children and joins them
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct MultiSpawnTask;
 
 #[allow(dead_code)]
@@ -584,13 +609,14 @@ pub struct MultiSpawnOutput {
 
 #[async_trait]
 impl Task<()> for MultiSpawnTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("multi-spawn")
     }
     type Params = MultiSpawnParams;
     type Output = MultiSpawnOutput;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -621,17 +647,19 @@ impl Task<()> for MultiSpawnTask {
 
 /// Parent task that spawns a failing child
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct SpawnFailingChildTask;
 
 #[async_trait]
 impl Task<()> for SpawnFailingChildTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("spawn-failing-child")
     }
     type Params = ();
     type Output = ();
 
     async fn run(
+        &self,
         _params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -658,6 +686,7 @@ impl Task<()> for SpawnFailingChildTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct LongRunningHeartbeatTask;
 
 #[allow(dead_code)]
@@ -671,13 +700,13 @@ pub struct LongRunningHeartbeatParams {
 
 #[async_trait]
 impl Task<()> for LongRunningHeartbeatTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("long-running-heartbeat")
     }
     type Params = LongRunningHeartbeatParams;
     type Output = String;
 
-    async fn run(params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(&self, params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         let start = std::time::Instant::now();
         let total_duration = std::time::Duration::from_millis(params.total_duration_ms);
         let heartbeat_interval = std::time::Duration::from_millis(params.heartbeat_interval_ms);
@@ -693,6 +722,7 @@ impl Task<()> for LongRunningHeartbeatTask {
 
 /// Slow child task (for testing cancellation)
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct SlowChildTask;
 
 #[allow(dead_code)]
@@ -703,13 +733,13 @@ pub struct SlowChildParams {
 
 #[async_trait]
 impl Task<()> for SlowChildTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("slow-child")
     }
     type Params = SlowChildParams;
     type Output = String;
 
-    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(&self, params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         tokio::time::sleep(std::time::Duration::from_millis(params.sleep_ms)).await;
         Ok("done".to_string())
     }
@@ -717,6 +747,7 @@ impl Task<()> for SlowChildTask {
 
 /// Parent task that spawns a slow child (for testing cancellation)
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct SpawnSlowChildTask;
 
 #[allow(dead_code)]
@@ -727,13 +758,14 @@ pub struct SpawnSlowChildParams {
 
 #[async_trait]
 impl Task<()> for SpawnSlowChildTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("spawn-slow-child")
     }
     type Params = SpawnSlowChildParams;
     type Output = String;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -760,6 +792,7 @@ impl Task<()> for SpawnSlowChildTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct EventEmitterTask;
 
 #[allow(dead_code)]
@@ -771,13 +804,13 @@ pub struct EventEmitterParams {
 
 #[async_trait]
 impl Task<()> for EventEmitterTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("event-emitter")
     }
     type Params = EventEmitterParams;
     type Output = String;
 
-    async fn run(params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(&self, params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         ctx.emit_event(&params.event_name, &params.payload).await?;
         Ok("emitted".to_string())
     }
@@ -788,6 +821,7 @@ impl Task<()> for EventEmitterTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct ManyStepsTask;
 
 #[allow(dead_code)]
@@ -798,13 +832,14 @@ pub struct ManyStepsParams {
 
 #[async_trait]
 impl Task<()> for ManyStepsTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("many-steps")
     }
     type Params = ManyStepsParams;
     type Output = u32;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -823,6 +858,7 @@ impl Task<()> for ManyStepsTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct LargePayloadTask;
 
 #[allow(dead_code)]
@@ -834,13 +870,14 @@ pub struct LargePayloadParams {
 
 #[async_trait]
 impl Task<()> for LargePayloadTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("large-payload")
     }
     type Params = LargePayloadParams;
     type Output = String;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -860,6 +897,7 @@ impl Task<()> for LargePayloadTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct CpuBoundTask;
 
 #[allow(dead_code)]
@@ -871,13 +909,13 @@ pub struct CpuBoundParams {
 
 #[async_trait]
 impl Task<()> for CpuBoundTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("cpu-bound")
     }
     type Params = CpuBoundParams;
     type Output = String;
 
-    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(&self, params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         let start = std::time::Instant::now();
         let duration = std::time::Duration::from_millis(params.duration_ms);
 
@@ -896,6 +934,7 @@ impl Task<()> for CpuBoundTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct SlowNoHeartbeatTask;
 
 #[allow(dead_code)]
@@ -907,13 +946,13 @@ pub struct SlowNoHeartbeatParams {
 
 #[async_trait]
 impl Task<()> for SlowNoHeartbeatTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("slow-no-heartbeat")
     }
     type Params = SlowNoHeartbeatParams;
     type Output = String;
 
-    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(&self, params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         // Just sleep - no heartbeat calls
         tokio::time::sleep(std::time::Duration::from_millis(params.sleep_ms)).await;
         Ok("done".to_string())
@@ -972,6 +1011,7 @@ pub fn get_execution_tracker() -> Option<Arc<ExecutionTracker>> {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct DeterministicReplayTask;
 
 #[allow(dead_code)]
@@ -1000,13 +1040,14 @@ pub fn reset_deterministic_task_state() {
 
 #[async_trait]
 impl Task<()> for DeterministicReplayTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("deterministic-replay")
     }
     type Params = DeterministicReplayParams;
     type Output = DeterministicReplayOutput;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -1054,6 +1095,7 @@ pub fn reset_event_then_fail_state() {
 }
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct EventThenFailTask;
 
 #[allow(dead_code)]
@@ -1064,13 +1106,14 @@ pub struct EventThenFailParams {
 
 #[async_trait]
 impl Task<()> for EventThenFailTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("event-then-fail")
     }
     type Params = EventThenFailParams;
     type Output = serde_json::Value;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -1105,6 +1148,7 @@ impl Task<()> for EventThenFailTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct EventThenDelayTask;
 
 #[allow(dead_code)]
@@ -1116,13 +1160,14 @@ pub struct EventThenDelayParams {
 
 #[async_trait]
 impl Task<()> for EventThenDelayTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("event-then-delay")
     }
     type Params = EventThenDelayParams;
     type Output = serde_json::Value;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -1144,6 +1189,7 @@ impl Task<()> for EventThenDelayTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct MultiEventTask;
 
 #[allow(dead_code)]
@@ -1155,13 +1201,14 @@ pub struct MultiEventParams {
 
 #[async_trait]
 impl Task<()> for MultiEventTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("multi-event")
     }
     type Params = MultiEventParams;
     type Output = serde_json::Value;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -1190,6 +1237,7 @@ pub fn reset_spawn_then_fail_state() {
 }
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct SpawnThenFailTask;
 
 #[allow(dead_code)]
@@ -1200,13 +1248,14 @@ pub struct SpawnThenFailParams {
 
 #[async_trait]
 impl Task<()> for SpawnThenFailTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("spawn-then-fail")
     }
     type Params = SpawnThenFailParams;
     type Output = serde_json::Value;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -1256,6 +1305,7 @@ impl Task<()> for SpawnThenFailTask {
 
 /// Parent task that spawns a child using spawn_by_name (dynamic version)
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct SpawnByNameTask;
 
 #[allow(dead_code)]
@@ -1272,13 +1322,14 @@ pub struct SpawnByNameOutput {
 
 #[async_trait]
 impl Task<()> for SpawnByNameTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("spawn-by-name")
     }
     type Params = SpawnByNameParams;
     type Output = SpawnByNameOutput;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -1305,6 +1356,7 @@ impl Task<()> for SpawnByNameTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct JoinCancelledChildTask;
 
 #[allow(dead_code)]
@@ -1315,13 +1367,14 @@ pub struct JoinCancelledChildParams {
 
 #[async_trait]
 impl Task<()> for JoinCancelledChildTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("join-cancelled-child")
     }
     type Params = JoinCancelledChildParams;
     type Output = String;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -1351,6 +1404,7 @@ impl Task<()> for JoinCancelledChildTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct VerySlowChildTask;
 
 #[allow(dead_code)]
@@ -1361,13 +1415,13 @@ pub struct VerySlowChildParams {
 
 #[async_trait]
 impl Task<()> for VerySlowChildTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("very-slow-child")
     }
     type Params = VerySlowChildParams;
     type Output = String;
 
-    async fn run(params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(&self, params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
         // Heartbeat regularly to keep this task alive
         let interval_ms = 500;
         let total_ms = params.sleep_ms;
