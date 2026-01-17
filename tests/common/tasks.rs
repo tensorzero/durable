@@ -96,7 +96,12 @@ impl Task<()> for EchoTask {
     type Params = EchoParams;
     type Output = String;
 
-    async fn run(&self, params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        params: Self::Params,
+        _ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         Ok(params.message)
     }
 }
@@ -123,7 +128,12 @@ impl Task<()> for FailingTask {
     type Params = FailingParams;
     type Output = ();
 
-    async fn run(&self, params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        params: Self::Params,
+        _ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         Err(TaskError::user_message(params.error_message.to_string()))
     }
 }
@@ -334,7 +344,12 @@ impl Task<()> for EmptyParamsTask {
     type Params = ();
     type Output = String;
 
-    async fn run(&self, _params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        _params: Self::Params,
+        _ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         Ok("completed".to_string())
     }
 }
@@ -361,7 +376,12 @@ impl Task<()> for HeartbeatTask {
     type Params = HeartbeatParams;
     type Output = u32;
 
-    async fn run(&self, params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        params: Self::Params,
+        ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         for _i in 0..params.iterations {
             // Simulate work
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -512,7 +532,12 @@ impl Task<()> for DoubleTask {
     type Params = DoubleParams;
     type Output = i32;
 
-    async fn run(&self, params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        params: Self::Params,
+        _ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         Ok(params.value * 2)
     }
 }
@@ -530,7 +555,12 @@ impl Task<()> for FailingChildTask {
     type Params = ();
     type Output = ();
 
-    async fn run(&self, _params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        _params: Self::Params,
+        _ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         Err(TaskError::user_message(
             "Child task failed intentionally".to_string(),
         ))
@@ -706,7 +736,12 @@ impl Task<()> for LongRunningHeartbeatTask {
     type Params = LongRunningHeartbeatParams;
     type Output = String;
 
-    async fn run(&self, params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        params: Self::Params,
+        ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         let start = std::time::Instant::now();
         let total_duration = std::time::Duration::from_millis(params.total_duration_ms);
         let heartbeat_interval = std::time::Duration::from_millis(params.heartbeat_interval_ms);
@@ -739,7 +774,12 @@ impl Task<()> for SlowChildTask {
     type Params = SlowChildParams;
     type Output = String;
 
-    async fn run(&self, params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        params: Self::Params,
+        _ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         tokio::time::sleep(std::time::Duration::from_millis(params.sleep_ms)).await;
         Ok("done".to_string())
     }
@@ -810,7 +850,12 @@ impl Task<()> for EventEmitterTask {
     type Params = EventEmitterParams;
     type Output = String;
 
-    async fn run(&self, params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        params: Self::Params,
+        ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         ctx.emit_event(&params.event_name, &params.payload).await?;
         Ok("emitted".to_string())
     }
@@ -915,7 +960,12 @@ impl Task<()> for CpuBoundTask {
     type Params = CpuBoundParams;
     type Output = String;
 
-    async fn run(&self, params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        params: Self::Params,
+        _ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         let start = std::time::Instant::now();
         let duration = std::time::Duration::from_millis(params.duration_ms);
 
@@ -952,7 +1002,12 @@ impl Task<()> for SlowNoHeartbeatTask {
     type Params = SlowNoHeartbeatParams;
     type Output = String;
 
-    async fn run(&self, params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        params: Self::Params,
+        _ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         // Just sleep - no heartbeat calls
         tokio::time::sleep(std::time::Duration::from_millis(params.sleep_ms)).await;
         Ok("done".to_string())
@@ -1421,7 +1476,12 @@ impl Task<()> for VerySlowChildTask {
     type Params = VerySlowChildParams;
     type Output = String;
 
-    async fn run(&self, params: Self::Params, ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        params: Self::Params,
+        ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         // Heartbeat regularly to keep this task alive
         let interval_ms = 500;
         let total_ms = params.sleep_ms;

@@ -7,17 +7,23 @@ use std::borrow::Cow;
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct NoOpTask;
 
 #[async_trait]
 impl Task<()> for NoOpTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("bench-noop")
     }
     type Params = ();
     type Output = ();
 
-    async fn run(_params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        _params: Self::Params,
+        _ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         Ok(())
     }
 }
@@ -27,6 +33,7 @@ impl Task<()> for NoOpTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct QuickTask;
 
 #[allow(dead_code)]
@@ -37,13 +44,18 @@ pub struct QuickParams {
 
 #[async_trait]
 impl Task<()> for QuickTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("bench-quick")
     }
     type Params = QuickParams;
     type Output = u32;
 
-    async fn run(params: Self::Params, _ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+    async fn run(
+        &self,
+        params: Self::Params,
+        _ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
         Ok(params.task_num)
     }
 }
@@ -53,6 +65,7 @@ impl Task<()> for QuickTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct MultiStepBenchTask;
 
 #[allow(dead_code)]
@@ -63,13 +76,14 @@ pub struct MultiStepParams {
 
 #[async_trait]
 impl Task<()> for MultiStepBenchTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("bench-multi-step")
     }
     type Params = MultiStepParams;
     type Output = u32;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
@@ -88,6 +102,7 @@ impl Task<()> for MultiStepBenchTask {
 // ============================================================================
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct LargePayloadBenchTask;
 
 #[allow(dead_code)]
@@ -98,13 +113,14 @@ pub struct LargePayloadParams {
 
 #[async_trait]
 impl Task<()> for LargePayloadBenchTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("bench-large-payload")
     }
     type Params = LargePayloadParams;
     type Output = usize;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: TaskContext,
         _state: (),
