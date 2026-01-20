@@ -722,6 +722,7 @@ struct AppState {
 }
 
 /// A task that uses the application state to write to a database table.
+#[derive(Default)]
 struct WriteToDbTask;
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -732,13 +733,14 @@ struct WriteToDbParams {
 
 #[durable::async_trait]
 impl durable::Task<AppState> for WriteToDbTask {
-    fn name() -> Cow<'static, str> {
+    fn name(&self) -> Cow<'static, str> {
         Cow::Borrowed("write-to-db")
     }
     type Params = WriteToDbParams;
     type Output = i64;
 
     async fn run(
+        &self,
         params: Self::Params,
         mut ctx: durable::TaskContext<AppState>,
         _state: AppState,

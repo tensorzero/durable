@@ -19,15 +19,16 @@
 //! #[derive(Serialize, Deserialize)]
 //! struct MyOutput { result: i32 }
 //!
+//! #[derive(Default)]
 //! struct MyTask;
 //!
 //! #[async_trait]
 //! impl Task<()> for MyTask {
-//!     fn name() -> Cow<'static, str> { Cow::Borrowed("my-task") }
+//!     fn name(&self) -> Cow<'static, str> { Cow::Borrowed("my-task") }
 //!     type Params = MyParams;
 //!     type Output = MyOutput;
 //!
-//!     async fn run(params: Self::Params, mut ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
+//!     async fn run(&self, params: Self::Params, mut ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
 //!         let doubled = ctx.step("double", || async {
 //!             Ok(params.value * 2)
 //!         }).await?;
@@ -61,15 +62,16 @@
 //!     http_client: reqwest::Client,
 //! }
 //!
+//! #[derive(Default)]
 //! struct FetchTask;
 //!
 //! #[async_trait]
 //! impl Task<AppState> for FetchTask {
-//!     fn name() -> Cow<'static, str> { Cow::Borrowed("fetch") }
+//!     fn name(&self) -> Cow<'static, str> { Cow::Borrowed("fetch") }
 //!     type Params = String;
 //!     type Output = String;
 //!
-//!     async fn run(url: Self::Params, mut ctx: TaskContext, state: AppState) -> TaskResult<Self::Output> {
+//!     async fn run(&self, url: Self::Params, mut ctx: TaskContext, state: AppState) -> TaskResult<Self::Output> {
 //!         ctx.step("fetch", || async {
 //!             state.http_client.get(&url).send().await?.text().await
 //!                 .map_err(|e| anyhow::anyhow!(e))
@@ -105,7 +107,7 @@ mod worker;
 pub use client::{Durable, DurableBuilder};
 pub use context::TaskContext;
 pub use error::{ControlFlow, DurableError, DurableResult, TaskError, TaskResult};
-pub use task::Task;
+pub use task::{ErasedTask, Task, TaskWrapper};
 pub use types::{
     CancellationPolicy, ClaimedTask, RetryStrategy, SpawnDefaults, SpawnOptions, SpawnResult,
     TaskHandle, WorkerOptions,
