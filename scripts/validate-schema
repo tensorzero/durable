@@ -1,0 +1,223 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["psycopg>=3.2.0", "testcontainers>=4.0.0"]
+# ///
+"""
+Validates that sql/schema.sql matches the result of applying all migrations.
+
+This script:
+1. Starts two PostgreSQL 16 containers
+2. Container A: Applies sql/schema.sql directly
+3. Container B: Applies all migrations in src/postgres/migrations/ in timestamp order
+4. Dumps both schemas using pg_dump --schema-only --schema=durable
+5. Compares the dumps (excluding the _sqlx_migrations table)
+6. Reports pass/fail with diff on failure
+"""
+
+import difflib
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import psycopg
+from testcontainers.postgres import PostgresContainer
+
+
+def get_project_root() -> Path:
+    """Find the project root by looking for Cargo.toml."""
+    current = Path(__file__).resolve().parent
+    while current != current.parent:
+        if (current / "Cargo.toml").exists():
+            return current
+        current = current.parent
+    raise RuntimeError("Could not find project root (no Cargo.toml found)")
+
+
+def get_migrations(project_root: Path) -> list[Path]:
+    """Get all migration files sorted by timestamp."""
+    migrations_dir = project_root / "src" / "postgres" / "migrations"
+    if not migrations_dir.exists():
+        raise RuntimeError(f"Migrations directory not found: {migrations_dir}")
+
+    migrations = sorted(migrations_dir.glob("*.sql"))
+    if not migrations:
+        raise RuntimeError(f"No migration files found in {migrations_dir}")
+
+    return migrations
+
+
+def get_psycopg_url(container: PostgresContainer) -> str:
+    """Get a psycopg-compatible connection URL from a testcontainer."""
+    # testcontainers returns a SQLAlchemy-style URL, we need to convert it
+    host = container.get_container_host_ip()
+    port = container.get_exposed_port(5432)
+    return f"postgresql://{container.username}:{container.password}@{host}:{port}/{container.dbname}"
+
+
+def apply_schema(conn: psycopg.Connection, schema_path: Path) -> None:
+    """Apply the schema.sql file to a database."""
+    sql = schema_path.read_text()
+    conn.execute(sql)
+    conn.commit()
+
+
+def apply_migrations(conn: psycopg.Connection, migrations: list[Path]) -> None:
+    """Apply all migrations to a database in order."""
+    for migration in migrations:
+        sql = migration.read_text()
+        conn.execute(sql)
+        conn.commit()
+
+
+def dump_schema(container: PostgresContainer) -> str:
+    """Dump the durable schema from a database using pg_dump."""
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            container.get_wrapped_container().id,
+            "pg_dump",
+            "-U",
+            container.username,
+            "-d",
+            container.dbname,
+            "--schema-only",
+            "--schema=durable",
+            "--no-owner",
+            "--no-privileges",
+            "--no-comments",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def normalize_dump(dump: str) -> str:
+    r"""Normalize a pg_dump output for comparison.
+
+    Removes:
+    - SET statements and other session configuration
+    - Comments
+    - Empty lines
+    - The _sqlx_migrations table and related objects
+    - pg_dump session markers (\\restrict, \\unrestrict)
+    """
+    lines = dump.split("\n")
+    normalized = []
+    skip_until_semicolon = False
+
+    for line in lines:
+        # Skip SET statements
+        if line.startswith("SET "):
+            continue
+
+        # Skip SELECT statements (like pg_catalog.set_config)
+        if line.startswith("SELECT "):
+            continue
+
+        # Skip comments
+        if line.startswith("--"):
+            continue
+
+        # Skip empty lines
+        if not line.strip():
+            continue
+
+        # Skip pg_dump session markers
+        if line.startswith("\\restrict") or line.startswith("\\unrestrict"):
+            continue
+
+        # Skip _sqlx_migrations table and related objects
+        if "_sqlx_migrations" in line:
+            skip_until_semicolon = True
+            continue
+
+        if skip_until_semicolon:
+            if ";" in line:
+                skip_until_semicolon = False
+            continue
+
+        normalized.append(line)
+
+    return "\n".join(normalized)
+
+
+def main() -> int:
+    project_root = get_project_root()
+    schema_path = project_root / "sql" / "schema.sql"
+    migrations = get_migrations(project_root)
+
+    print(f"Project root: {project_root}")
+    print(f"Schema file: {schema_path}")
+    print(f"Found {len(migrations)} migrations:")
+    for m in migrations:
+        print(f"  - {m.name}")
+    print()
+
+    if not schema_path.exists():
+        print(f"ERROR: Schema file not found: {schema_path}", file=sys.stderr)
+        return 1
+
+    # Use PostgreSQL 16 to match production
+    postgres_image = "postgres:16-alpine"
+
+    print("Starting PostgreSQL containers...")
+
+    with (
+        PostgresContainer(postgres_image) as schema_container,
+        PostgresContainer(postgres_image) as migrations_container,
+    ):
+        print("Containers started.")
+        print()
+
+        # Apply schema.sql to container A
+        print("Applying schema.sql to container A...")
+        with psycopg.connect(get_psycopg_url(schema_container)) as conn:
+            apply_schema(conn, schema_path)
+        print("Schema applied.")
+
+        # Apply migrations to container B
+        print("Applying migrations to container B...")
+        with psycopg.connect(get_psycopg_url(migrations_container)) as conn:
+            apply_migrations(conn, migrations)
+        print("Migrations applied.")
+        print()
+
+        # Dump both schemas
+        print("Dumping schemas...")
+        schema_dump = dump_schema(schema_container)
+        migrations_dump = dump_schema(migrations_container)
+
+        # Normalize for comparison
+        schema_normalized = normalize_dump(schema_dump)
+        migrations_normalized = normalize_dump(migrations_dump)
+
+        # Compare
+        if schema_normalized == migrations_normalized:
+            print("SUCCESS: schema.sql matches migrations")
+            return 0
+
+        print("FAILURE: schema.sql does not match migrations")
+        print()
+        print("Diff (schema.sql vs migrations):")
+        print("-" * 60)
+
+        diff = difflib.unified_diff(
+            schema_normalized.split("\n"),
+            migrations_normalized.split("\n"),
+            fromfile="schema.sql",
+            tofile="migrations",
+            lineterm="",
+        )
+        for line in diff:
+            print(line)
+
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
