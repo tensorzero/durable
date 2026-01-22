@@ -115,6 +115,27 @@ where
     state: State,
 }
 
+impl<State: Clone + Send + Sync> Durable<State> {
+    /// TODO: Decide if we want to implement `Clone`,
+    /// which will allow consumers to clone `Durable`
+    /// Currently, we only allow cloning with in the crate
+    /// via this method
+    pub(crate) fn clone_inner(&self) -> Durable<State> {
+        Durable {
+            pool: self.pool.clone(),
+            owns_pool: self.owns_pool,
+            queue_name: self.queue_name.clone(),
+            spawn_defaults: self.spawn_defaults.clone(),
+            registry: self.registry.clone(),
+            state: self.state.clone(),
+        }
+    }
+
+    pub(crate) fn registry(&self) -> &Arc<RwLock<TaskRegistry<State>>> {
+        &self.registry
+    }
+}
+
 /// Builder for configuring a [`Durable`] client.
 ///
 /// # Example
@@ -692,14 +713,17 @@ where
             });
         }
 
-        Ok(Worker::start(
-            self.pool.clone(),
-            self.queue_name.clone(),
-            self.registry.clone(),
-            options,
-            self.state.clone(),
-            self.spawn_defaults.clone(),
-        )
+        // For now, we just manually construct a `Durable` with clones
+        // of our fields. In the future, we may want to make `Durable`
+        // implement `Clone`, or make an inner struct and wrap it in an `Arc`
+        Ok(Worker::start(Durable {
+            pool: self.pool.clone(),
+            owns_pool: self.owns_pool,
+            queue_name: self.queue_name.clone(),
+            spawn_defaults: self.spawn_defaults.clone(),
+            registry: self.registry.clone(),
+            state: self.state.clone(),
+        }, options)
         .await)
     }
 
