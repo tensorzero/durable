@@ -7,7 +7,7 @@
 Validates that sql/schema.sql matches the result of applying all migrations.
 
 This script:
-1. Starts two PostgreSQL 16 containers
+1. Starts two PostgreSQL 14 containers (to match TensorZero's minimum supported version)
 2. Container A: Applies sql/schema.sql directly
 3. Container B: Applies all migrations in src/postgres/migrations/ in timestamp order
 4. Dumps both schemas using pg_dump --schema-only --schema=durable
@@ -162,8 +162,8 @@ def main() -> int:
         print(f"ERROR: Schema file not found: {schema_path}", file=sys.stderr)
         return 1
 
-    # Use PostgreSQL 16 to match production
-    postgres_image = "postgres:16-alpine"
+    # Use PostgreSQL 14 to match production
+    postgres_image = "postgres:14-alpine"
 
     print("Starting PostgreSQL containers...")
 
