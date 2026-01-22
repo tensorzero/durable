@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769097833061,
+  "lastUpdate": 1769104336026,
   "repoUrl": "https://github.com/tensorzero/durable",
   "entries": {
     "Criterion Benchmark": [
@@ -2549,6 +2549,156 @@ window.BENCHMARK_DATA = {
             "name": "e2e_completion/single_task_roundtrip",
             "value": 15919303,
             "range": "± 604010",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "virajmehta@users.noreply.github.com",
+            "name": "Viraj Mehta",
+            "username": "virajmehta"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": false,
+          "id": "3a06598377de257ba27dc1e5be2aa44f92b1dd49",
+          "message": "Improve indices for common queries (#61)\n\n* add a migration adding an index for claim task + infra for doing migrations nicely\n\n* attempt at fixing migration\n\n* make them match\n\n* added all indices required for durable queries\n\n* added an index for sleeping\n\n* add infrastructure for migrations\n\n* added index for wait registrations on task_id\n\n* consolidated partial indices",
+          "timestamp": "2026-01-22T17:15:57Z",
+          "tree_id": "0dcc349e197551b7d96f9bd9d70154290335d2f6",
+          "url": "https://github.com/tensorzero/durable/commit/3a06598377de257ba27dc1e5be2aa44f92b1dd49"
+        },
+        "date": 1769104335723,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "step_cache_miss/steps/10",
+            "value": 43365672,
+            "range": "± 2220700",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/50",
+            "value": 87376159,
+            "range": "± 2230491",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/100",
+            "value": 140638887,
+            "range": "± 1537665",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/10",
+            "value": 13673352,
+            "range": "± 1162841",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/50",
+            "value": 13343637,
+            "range": "± 1075671",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/100",
+            "value": 14527729,
+            "range": "± 1512801",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1",
+            "value": 26901929,
+            "range": "± 484581",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/100",
+            "value": 24691549,
+            "range": "± 574628",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1000",
+            "value": 72159425,
+            "range": "± 5134215",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/2",
+            "value": 657555123,
+            "range": "± 10333574",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/4",
+            "value": 420321009,
+            "range": "± 8288872",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/8",
+            "value": 383839629,
+            "range": "± 23648868",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/16",
+            "value": 391011031,
+            "range": "± 17624089",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/baseline",
+            "value": 163689628,
+            "range": "± 6753675",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/contention",
+            "value": 119305379,
+            "range": "± 6461555",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "spawn_latency/single_spawn",
+            "value": 858330,
+            "range": "± 455836",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/1",
+            "value": 626163324,
+            "range": "± 6531432",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/2",
+            "value": 371482620,
+            "range": "± 6630348",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/4",
+            "value": 257121810,
+            "range": "± 2889100",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/8",
+            "value": 201416944,
+            "range": "± 1871613",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "e2e_completion/single_task_roundtrip",
+            "value": 15839844,
+            "range": "± 440808",
             "unit": "ns/iter"
           }
         ]
