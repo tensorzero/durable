@@ -228,7 +228,7 @@ pub fn serialize_task_error(err: &TaskError) -> JsonValue {
             serde_json::json!({
                 "name": "SubtaskSpawnFailed",
                 "message": error.to_string(),
-                "name": name,
+                "subtask_name": name,
             })
         }
         TaskError::ChildFailed { step_name, message } => {

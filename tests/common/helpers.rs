@@ -220,7 +220,6 @@ pub async fn wait_for_task_terminal(
     let poll_interval = Duration::from_millis(50);
 
     while start.elapsed() < timeout {
-        eprintln!("Task: {:?}", get_task_state(pool, queue, task_id).await);
         if let Some(state) = get_task_state(pool, queue, task_id).await?
             && (state == "completed" || state == "failed" || state == "cancelled")
         {
