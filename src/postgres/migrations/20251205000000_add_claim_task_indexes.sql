@@ -154,6 +154,14 @@ begin
     ('t_' || p_queue_name) || '_cxl',
     't_' || p_queue_name
   );
+
+  -- Speed up emit_event sleeping task lookup.
+  execute format(
+    'create index if not exists %I on durable.%I (task_id)
+     where state = ''sleeping''',
+    ('t_' || p_queue_name) || '_slp',
+    't_' || p_queue_name
+  );
 end;
 $$;
 
