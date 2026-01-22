@@ -155,18 +155,12 @@ begin
     't_' || p_queue_name
   );
 
+  -- Composite index for active task state lookups.
+  -- Enables Index Only Scans for claim_task join, emit_event, and cancel propagation.
   execute format(
-    'create index if not exists %I on durable.%I (task_id)
-     where state = ''cancelled''',
-    ('t_' || p_queue_name) || '_cxl',
-    't_' || p_queue_name
-  );
-
-  -- Speed up emit_event sleeping task lookup.
-  execute format(
-    'create index if not exists %I on durable.%I (task_id)
-     where state = ''sleeping''',
-    ('t_' || p_queue_name) || '_slp',
+    'create index if not exists %I on durable.%I (state, task_id)
+     where state in (''pending'', ''sleeping'', ''running'', ''cancelled'')',
+    ('t_' || p_queue_name) || '_state_tid',
     't_' || p_queue_name
   );
 end;
