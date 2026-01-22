@@ -144,7 +144,7 @@ begin
      where state in (''pending'', ''sleeping'', ''running'')
        and cancellation is not null
        and (cancellation ? ''max_delay'' or cancellation ? ''max_duration'')',
-    ('t_' || p_queue_name) || '_cxlpol,
+    ('t_' || p_queue_name) || '_cxlpol',
     't_' || p_queue_name
   );
 

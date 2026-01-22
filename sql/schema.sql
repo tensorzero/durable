@@ -202,14 +202,14 @@ begin
      where state in (''pending'', ''sleeping'', ''running'')
        and cancellation is not null
        and (cancellation ? ''max_delay'' or cancellation ? ''max_duration'')',
-    ('t_' || p_queue_name) || '_active_cancellable',
+    ('t_' || p_queue_name) || '_cxlpol',
     't_' || p_queue_name
   );
 
   execute format(
-    'create index if not exists %I on durable.%I (state)
+    'create index if not exists %I on durable.%I (task_id)
      where state = ''cancelled''',
-    ('t_' || p_queue_name) || '_state_cancelled',
+    ('t_' || p_queue_name) || '_cxl',
     't_' || p_queue_name
   );
 end;
