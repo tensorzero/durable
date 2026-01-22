@@ -82,10 +82,8 @@ async fn test_spawn_with_custom_max_attempts(pool: PgPool) -> sqlx::Result<()> {
     client.create_queue(None).await.unwrap();
     client.register::<EchoTask>().await.unwrap();
 
-    let options = SpawnOptions {
-        max_attempts: Some(10),
-        ..Default::default()
-    };
+    let mut options = SpawnOptions::default();
+    options.max_attempts = Some(10);
 
     let result = client
         .spawn_with_options::<EchoTask>(
@@ -109,10 +107,8 @@ async fn test_spawn_with_retry_strategy_none(pool: PgPool) -> sqlx::Result<()> {
     client.create_queue(None).await.unwrap();
     client.register::<FailingTask>().await.unwrap();
 
-    let options = SpawnOptions {
-        retry_strategy: Some(RetryStrategy::None),
-        ..Default::default()
-    };
+    let mut options = SpawnOptions::default();
+    options.retry_strategy = Some(RetryStrategy::None);
 
     let result = client
         .spawn_with_options::<FailingTask>(
@@ -135,12 +131,10 @@ async fn test_spawn_with_retry_strategy_fixed(pool: PgPool) -> sqlx::Result<()> 
     client.create_queue(None).await.unwrap();
     client.register::<EchoTask>().await.unwrap();
 
-    let options = SpawnOptions {
-        retry_strategy: Some(RetryStrategy::Fixed {
-            base_delay: Duration::from_secs(10),
-        }),
-        ..Default::default()
-    };
+    let mut options = SpawnOptions::default();
+    options.retry_strategy = Some(RetryStrategy::Fixed {
+        base_delay: Duration::from_secs(10),
+    });
 
     let result = client
         .spawn_with_options::<EchoTask>(
@@ -163,14 +157,12 @@ async fn test_spawn_with_retry_strategy_exponential(pool: PgPool) -> sqlx::Resul
     client.create_queue(None).await.unwrap();
     client.register::<EchoTask>().await.unwrap();
 
-    let options = SpawnOptions {
-        retry_strategy: Some(RetryStrategy::Exponential {
-            base_delay: Duration::from_secs(5),
-            factor: 2.0,
-            max_backoff: Duration::from_secs(300),
-        }),
-        ..Default::default()
-    };
+    let mut options = SpawnOptions::default();
+    options.retry_strategy = Some(RetryStrategy::Exponential {
+        base_delay: Duration::from_secs(5),
+        factor: 2.0,
+        max_backoff: Duration::from_secs(300),
+    });
 
     let result = client
         .spawn_with_options::<EchoTask>(
@@ -197,10 +189,8 @@ async fn test_spawn_with_headers(pool: PgPool) -> sqlx::Result<()> {
     headers.insert("correlation_id".to_string(), serde_json::json!("abc-123"));
     headers.insert("priority".to_string(), serde_json::json!(5));
 
-    let options = SpawnOptions {
-        headers: Some(headers),
-        ..Default::default()
-    };
+    let mut options = SpawnOptions::default();
+    options.headers = Some(headers);
 
     let result = client
         .spawn_with_options::<EchoTask>(
@@ -223,13 +213,11 @@ async fn test_spawn_with_cancellation_policy(pool: PgPool) -> sqlx::Result<()> {
     client.create_queue(None).await.unwrap();
     client.register::<EchoTask>().await.unwrap();
 
-    let options = SpawnOptions {
-        cancellation: Some(CancellationPolicy {
-            max_pending_time: Some(Duration::from_secs(60)),
-            max_running_time: Some(Duration::from_secs(300)),
-        }),
-        ..Default::default()
-    };
+    let mut options = SpawnOptions::default();
+    options.cancellation = Some(CancellationPolicy {
+        max_pending_time: Some(Duration::from_secs(60)),
+        max_running_time: Some(Duration::from_secs(300)),
+    });
 
     let result = client
         .spawn_with_options::<EchoTask>(
@@ -307,13 +295,11 @@ async fn test_spawn_by_name_with_options(pool: PgPool) -> sqlx::Result<()> {
         "message": "value"
     });
 
-    let options = SpawnOptions {
-        max_attempts: Some(3),
-        retry_strategy: Some(RetryStrategy::Fixed {
-            base_delay: Duration::from_secs(5),
-        }),
-        ..Default::default()
-    };
+    let mut options = SpawnOptions::default();
+    options.max_attempts = Some(3);
+    options.retry_strategy = Some(RetryStrategy::Fixed {
+        base_delay: Duration::from_secs(5),
+    });
 
     let result = client
         .spawn_by_name("echo", params, options)
@@ -535,10 +521,8 @@ async fn test_spawn_rejects_reserved_header_prefix(pool: PgPool) -> sqlx::Result
     let mut headers = HashMap::new();
     headers.insert("durable::custom".to_string(), serde_json::json!("value"));
 
-    let options = SpawnOptions {
-        headers: Some(headers),
-        ..Default::default()
-    };
+    let mut options = SpawnOptions::default();
+    options.headers = Some(headers);
 
     let result = client
         .spawn_with_options::<EchoTask>(
@@ -572,10 +556,8 @@ async fn test_spawn_allows_non_reserved_headers(pool: PgPool) -> sqlx::Result<()
     headers.insert("durable".to_string(), serde_json::json!("no colons"));
     headers.insert("durable:single".to_string(), serde_json::json!("one colon"));
 
-    let options = SpawnOptions {
-        headers: Some(headers),
-        ..Default::default()
-    };
+    let mut options = SpawnOptions::default();
+    options.headers = Some(headers);
 
     let result = client
         .spawn_with_options::<EchoTask>(

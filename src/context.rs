@@ -629,7 +629,14 @@ where
 
         let spawned_task = self
             .durable
-            .spawn_by_name(task_name, params, options)
+            .spawn_by_name(
+                task_name,
+                params,
+                SpawnOptions {
+                    parent_task_id: Some(self.task_id),
+                    ..options
+                },
+            )
             .await
             .map_err(|e| TaskError::SubtaskSpawnFailed {
                 name: task_name.to_string(),

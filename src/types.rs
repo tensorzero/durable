@@ -134,6 +134,9 @@ pub struct SpawnOptions {
     /// Cancellation policy
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancellation: Option<CancellationPolicy>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) parent_task_id: Option<Uuid>,
 }
 
 /// Options for configuring a worker.

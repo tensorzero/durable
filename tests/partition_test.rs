@@ -35,12 +35,13 @@ async fn test_db_connection_lost_during_checkpoint(pool: PgPool) -> sqlx::Result
             StepCountingParams {
                 fail_after_step2: true,
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(3),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(3);
+                opts
             },
         )
         .await
@@ -100,12 +101,13 @@ async fn test_stale_worker_checkpoint_rejected(pool: PgPool) -> sqlx::Result<()>
             SlowNoHeartbeatParams {
                 sleep_ms: 30000, // 30 seconds
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(5),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(5);
+                opts
             },
         )
         .await

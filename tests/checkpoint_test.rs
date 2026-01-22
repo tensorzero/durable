@@ -41,12 +41,13 @@ async fn test_checkpoint_prevents_step_reexecution(pool: PgPool) -> sqlx::Result
             StepCountingParams {
                 fail_after_step2: true,
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(2),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(2);
+                opts
             },
         )
         .await
@@ -141,12 +142,13 @@ async fn test_deterministic_rand_preserved_on_retry(pool: PgPool) -> sqlx::Resul
             DeterministicReplayParams {
                 fail_on_first_attempt: true,
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(2),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(2);
+                opts
             },
         )
         .await
@@ -205,12 +207,13 @@ async fn test_deterministic_now_preserved_on_retry(pool: PgPool) -> sqlx::Result
             DeterministicReplayParams {
                 fail_on_first_attempt: true,
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(2),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(2);
+                opts
             },
         )
         .await
@@ -266,12 +269,13 @@ async fn test_deterministic_uuid7_preserved_on_retry(pool: PgPool) -> sqlx::Resu
             DeterministicReplayParams {
                 fail_on_first_attempt: true,
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(2),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(2);
+                opts
             },
         )
         .await

@@ -696,14 +696,11 @@ impl Task<()> for SpawnFailingChildTask {
     ) -> TaskResult<Self::Output> {
         // Spawn with max_attempts=1 so child fails immediately without retries
         let handle: TaskHandle<()> = ctx
-            .spawn::<FailingChildTask>(
-                "child",
-                (),
-                SpawnOptions {
-                    max_attempts: Some(1),
-                    ..Default::default()
-                },
-            )
+            .spawn::<FailingChildTask>("child", (), {
+                let mut opts = SpawnOptions::default();
+                opts.max_attempts = Some(1);
+                opts
+            })
             .await?;
         // This should fail because child fails
         ctx.join(handle).await?;

@@ -24,6 +24,8 @@ struct SpawnOptionsDb<'a> {
     retry_strategy: Option<&'a RetryStrategy>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cancellation: Option<CancellationPolicyDb>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_task_id: Option<&'a Uuid>,
 }
 
 /// Internal struct for serializing cancellation policy (only non-None fields).
@@ -578,6 +580,7 @@ where
                 .cancellation
                 .as_ref()
                 .and_then(CancellationPolicyDb::from_policy),
+            parent_task_id: options.parent_task_id.as_ref(),
         };
         serde_json::to_value(db_options)
     }

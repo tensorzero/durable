@@ -41,12 +41,13 @@ async fn test_crash_mid_step_resumes_from_checkpoint(pool: PgPool) -> sqlx::Resu
             StepCountingParams {
                 fail_after_step2: true,
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(3),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(3);
+                opts
             },
         )
         .await
@@ -303,6 +304,7 @@ async fn test_heartbeat_prevents_lease_expiration(pool: PgPool) -> sqlx::Result<
 /// Uses SingleSpawnTask which already exists and spawns a child.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_spawn_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
+    tracing_subscriber::fmt::init();
     use common::tasks::{DoubleTask, SingleSpawnParams, SingleSpawnTask};
 
     let client = create_client(pool.clone(), "crash_spawn").await;
@@ -381,12 +383,13 @@ async fn test_step_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
             StepCountingParams {
                 fail_after_step2: false, // Don't fail, just complete
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(2),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(2);
+                opts
             },
         )
         .await
@@ -449,12 +452,13 @@ async fn test_cpu_bound_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
             CpuBoundParams {
                 duration_ms: 10000, // 10 seconds
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(3),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(3);
+                opts
             },
         )
         .await
@@ -509,12 +513,13 @@ async fn test_slow_task_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
             SlowNoHeartbeatParams {
                 sleep_ms: 30000, // 30 seconds - much longer than lease
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(5),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(5);
+                opts
             },
         )
         .await

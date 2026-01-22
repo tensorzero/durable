@@ -34,10 +34,11 @@ async fn test_retry_strategy_none_no_retry(pool: PgPool) -> sqlx::Result<()> {
             FailingParams {
                 error_message: "intentional failure".to_string(),
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::None),
-                max_attempts: Some(1),
-                ..Default::default()
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::None);
+                opts.max_attempts = Some(1);
+                opts
             },
         )
         .await
@@ -87,12 +88,13 @@ async fn test_retry_strategy_fixed_delay(pool: PgPool) -> sqlx::Result<()> {
             FailingParams {
                 error_message: "intentional failure".to_string(),
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(5),
-                }),
-                max_attempts: Some(2),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(2);
+                opts
             },
         )
         .await
@@ -166,14 +168,15 @@ async fn test_retry_strategy_exponential_backoff(pool: PgPool) -> sqlx::Result<(
             FailingParams {
                 error_message: "intentional failure".to_string(),
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Exponential {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Exponential {
                     base_delay: Duration::from_secs(2),
                     factor: 2.0,
                     max_backoff: Duration::from_secs(100),
-                }),
-                max_attempts: Some(3),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(3);
+                opts
             },
         )
         .await
@@ -249,12 +252,13 @@ async fn test_max_attempts_honored(pool: PgPool) -> sqlx::Result<()> {
             FailingParams {
                 error_message: "intentional failure".to_string(),
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(3),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(3);
+                opts
             },
         )
         .await
