@@ -160,6 +160,15 @@ begin
     'r_' || p_queue_name
   );
 
+  -- Partial index for claim candidate ORDER BY (available_at, run_id).
+  -- Matches the exact ordering used in the claim query for ready runs.
+  execute format(
+    'create index if not exists %I on durable.%I (available_at, run_id) include (task_id)
+     where state in (''pending'', ''sleeping'')',
+    ('r_' || p_queue_name) || '_ready',
+    'r_' || p_queue_name
+  );
+
   execute format(
     'create index if not exists %I on durable.%I (task_id)',
     ('r_' || p_queue_name) || '_ti',
@@ -187,11 +196,13 @@ begin
     'r_' || p_queue_name
   );
 
-  -- Speed up cancellation and cancelled-task sync scans.
+  -- Speed up cancellation sweep: only index tasks that have cancellation policies.
   execute format(
-    'create index if not exists %I on durable.%I (state)
-     where state in (''pending'', ''sleeping'', ''running'')',
-    ('t_' || p_queue_name) || '_state_active',
+    'create index if not exists %I on durable.%I (task_id)
+     where state in (''pending'', ''sleeping'', ''running'')
+       and cancellation is not null
+       and (cancellation ? ''max_delay'' or cancellation ? ''max_duration'')',
+    ('t_' || p_queue_name) || '_active_cancellable',
     't_' || p_queue_name
   );
 
@@ -369,6 +380,7 @@ begin
   -- These are max_delay (delay before starting) and
   -- max_duration (duration from created to finished)
   -- Use a loop so we can cleanup each cancelled task properly.
+  -- Only scan tasks that actually have cancellation policies set.
   for v_cancelled_task in
     execute format(
       'with limits as (
@@ -380,6 +392,8 @@ begin
                  state
             from durable.%I
           where state in (''pending'', ''sleeping'', ''running'')
+            and cancellation is not null
+            and (cancellation ? ''max_delay'' or cancellation ? ''max_duration'')
        ),
        to_cancel as (
           select task_id
