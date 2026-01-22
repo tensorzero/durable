@@ -112,7 +112,7 @@ impl Worker {
 
         // Mark worker as active
         #[cfg(feature = "telemetry")]
-        crate::telemetry::set_worker_active(&queue_name, &worker_id, true);
+        crate::telemetry::set_worker_active(durable.queue_name(), &worker_id, true);
 
         // Semaphore limits concurrent task execution
         let semaphore = Arc::new(Semaphore::new(concurrency));
@@ -127,7 +127,7 @@ impl Worker {
                     tracing::info!("Worker shutting down, waiting for in-flight tasks...");
 
                     #[cfg(feature = "telemetry")]
-                    crate::telemetry::set_worker_active(&queue_name, &worker_id, false);
+                    crate::telemetry::set_worker_active(durable.queue_name(), &worker_id, false);
 
                     drop(done_tx);
                     while done_rx.recv().await.is_some() {}
@@ -192,8 +192,8 @@ impl Worker {
         tracing::instrument(
             level = "debug",
             name = "durable.worker.claim_tasks",
-            skip(pool),
-            fields(queue = %queue_name, worker_id = %worker_id, count = count)
+            skip(durable),
+            fields(queue = %durable.queue_name(), worker_id = %worker_id, count = count)
         )
     )]
     async fn claim_tasks<State: Clone + Send + Sync>(
@@ -225,9 +225,9 @@ impl Worker {
         #[cfg(feature = "telemetry")]
         {
             let duration = start.elapsed().as_secs_f64();
-            crate::telemetry::record_task_claim_duration(queue_name, duration);
+            crate::telemetry::record_task_claim_duration(durable.queue_name(), duration);
             for _ in &tasks {
-                crate::telemetry::record_task_claimed(queue_name);
+                crate::telemetry::record_task_claimed(durable.queue_name());
             }
         }
 
@@ -285,7 +285,7 @@ impl Worker {
         #[cfg(feature = "telemetry")]
         let task_name = task.task_name.clone();
         #[cfg(feature = "telemetry")]
-        let queue_name_for_metrics = queue_name.clone();
+        let queue_name_for_metrics = durable.queue_name().to_string();
         let start_time = Instant::now();
 
         // Create lease extension channel - TaskContext will notify when lease is extended

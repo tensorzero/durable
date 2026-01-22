@@ -197,7 +197,7 @@ where
         {
             let duration = checkpoint_start.elapsed().as_secs_f64();
             crate::telemetry::record_checkpoint_duration(
-                &self.queue_name,
+                self.durable.queue_name(),
                 &self.task.task_name,
                 duration,
             );
