@@ -123,6 +123,13 @@ begin
     'w_' || p_queue_name
   );
 
+  -- Speed up cleanup_task_terminal wait deletion by task_id.
+  execute format(
+    'create index if not exists %I on durable.%I (task_id)',
+    ('w_' || p_queue_name) || '_ti',
+    'w_' || p_queue_name
+  );
+
   -- Index for finding children of a parent task (for cascade cancellation)
   execute format(
     'create index if not exists %I on durable.%I (parent_task_id) where parent_task_id is not null',
