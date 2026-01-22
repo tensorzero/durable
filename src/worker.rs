@@ -304,7 +304,14 @@ impl Worker {
             Ok(ctx) => ctx,
             Err(e) => {
                 tracing::error!("Failed to create task context: {}", e);
-                Self::fail_run(durable.pool(), durable.queue_name(), task.task_id, task.run_id, &e.into()).await;
+                Self::fail_run(
+                    durable.pool(),
+                    durable.queue_name(),
+                    task.task_id,
+                    task.run_id,
+                    &e.into(),
+                )
+                .await;
                 return;
             }
         };
@@ -462,7 +469,14 @@ impl Worker {
                 {
                     outcome = "completed";
                 }
-                Self::complete_run(durable.pool(), durable.queue_name(), task.task_id, task.run_id, output).await;
+                Self::complete_run(
+                    durable.pool(),
+                    durable.queue_name(),
+                    task.task_id,
+                    task.run_id,
+                    output,
+                )
+                .await;
 
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::record_task_completed(&queue_name_for_metrics, &task_name);
@@ -490,7 +504,14 @@ impl Worker {
                     outcome = "failed";
                 }
                 tracing::error!("Task {} failed: {}", task_label, e);
-                Self::fail_run(durable.pool(), durable.queue_name(), task.task_id, task.run_id, e).await;
+                Self::fail_run(
+                    durable.pool(),
+                    durable.queue_name(),
+                    task.task_id,
+                    task.run_id,
+                    e,
+                )
+                .await;
 
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::record_task_failed(
