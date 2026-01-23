@@ -11,8 +11,8 @@ use uuid::Uuid;
 use crate::error::{DurableError, DurableResult};
 use crate::task::{Task, TaskRegistry, TaskWrapper};
 use crate::types::{
-    CancellationPolicy, RetryStrategy, SpawnDefaults, SpawnOptions, SpawnResult, SpawnResultRow,
-    WorkerOptions,
+    CancellationPolicy, DurableEventPayload, RetryStrategy, SpawnDefaults, SpawnOptions,
+    SpawnResult, SpawnResultRow, WorkerOptions,
 };
 
 /// Internal struct for serializing spawn options to the database.
@@ -684,7 +684,21 @@ where
         #[cfg(feature = "telemetry")]
         tracing::Span::current().record("queue", queue);
 
-        let payload_json = serde_json::to_value(payload)?;
+        let inner_payload_json = serde_json::to_value(payload)?;
+
+        let mut payload_wrapper = DurableEventPayload {
+            inner: inner_payload_json,
+            metadata: JsonValue::Null,
+        };
+
+        #[allow(unused_mut)] // mut is needed when telemetry feature is enabled
+        let mut metadata_map: HashMap<String, JsonValue> = HashMap::new();
+
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::inject_trace_context(&mut metadata_map);
+        payload_wrapper.metadata = serde_json::to_value(metadata_map)?;
+
+        let payload_json = serde_json::to_value(payload_wrapper)?;
 
         let query = "SELECT durable.emit_event($1, $2, $3)";
         sqlx::query(query)
