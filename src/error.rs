@@ -77,6 +77,13 @@ pub enum TaskError {
     #[error("failed to spawn subtask `{name}`: {error}")]
     SubtaskSpawnFailed { name: String, error: DurableError },
 
+    /// Error occurred while trying to emit an event.
+    #[error("failed to emit event `{event_name}`: {error}")]
+    EmitEventFailed {
+        event_name: String,
+        error: DurableError,
+    },
+
     /// A child task failed.
     ///
     /// Returned by [`TaskContext::join`](crate::TaskContext::join) when the child
@@ -229,6 +236,13 @@ pub fn serialize_task_error(err: &TaskError) -> JsonValue {
                 "name": "SubtaskSpawnFailed",
                 "message": error.to_string(),
                 "subtask_name": name,
+            })
+        }
+        TaskError::EmitEventFailed { event_name, error } => {
+            serde_json::json!({
+                "name": "EmitEventFailed",
+                "message": error.to_string(),
+                "event_name": event_name,
             })
         }
         TaskError::ChildFailed { step_name, message } => {

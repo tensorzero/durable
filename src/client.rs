@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sqlx::{Executor, PgPool, Postgres};
 use std::collections::HashMap;
@@ -684,7 +684,18 @@ where
         #[cfg(feature = "telemetry")]
         tracing::Span::current().record("queue", queue);
 
-        let payload_json = serde_json::to_value(payload)?;
+        let inner_payload_json = serde_json::to_value(payload)?;
+
+        #[allow(unused_mut)] // mut is needed when telemetry feature is enabled
+        let mut payload_wrapper = EventPayloadWrapper {
+            inner: inner_payload_json,
+            trace_context: HashMap::new(),
+        };
+
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::inject_trace_context(&mut payload_wrapper.trace_context);
+
+        let payload_json = serde_json::to_value(payload_wrapper)?;
 
         let query = "SELECT durable.emit_event($1, $2, $3)";
         sqlx::query(query)
@@ -734,4 +745,14 @@ where
             self.pool.close().await;
         }
     }
+}
+
+/// A wrapper struct that we use in 'emit_event'
+/// This allows us to attach extra data (e.g. a trace context)
+#[derive(Serialize, Deserialize)]
+
+pub(crate) struct EventPayloadWrapper {
+    pub inner: JsonValue,
+    // Populated by 'inject_trace_context'
+    pub trace_context: HashMap<String, JsonValue>,
 }

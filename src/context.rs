@@ -6,6 +6,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use crate::Durable;
+use crate::client::EventPayloadWrapper;
 use crate::error::{ControlFlow, TaskError, TaskResult};
 use crate::task::Task;
 use crate::types::{
@@ -351,7 +352,7 @@ where
 
         // Check cache for already-received event
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
-            return Ok(serde_json::from_value(cached.clone())?);
+            return Self::process_event_payload_wrapper(cached.clone());
         }
 
         // Check if we were woken by this event but it timed out (null payload)
@@ -383,10 +384,30 @@ where
         }
 
         // Event arrived - cache and return
-        let payload = result.payload.unwrap_or(JsonValue::Null);
+        let payload_wrapper_json = result.payload.unwrap_or(JsonValue::Null);
         self.checkpoint_cache
-            .insert(checkpoint_name, payload.clone());
-        Ok(serde_json::from_value(payload)?)
+            .insert(checkpoint_name, payload_wrapper_json.clone());
+
+        Self::process_event_payload_wrapper(payload_wrapper_json)
+    }
+
+    fn process_event_payload_wrapper<T: DeserializeOwned>(value: JsonValue) -> TaskResult<T> {
+        let payload_wrapper: EventPayloadWrapper = serde_json::from_value(value)?;
+        let payload_inner = payload_wrapper.inner;
+        #[cfg(feature = "telemetry")]
+        {
+            use opentelemetry::KeyValue;
+            use opentelemetry::trace::TraceContextExt;
+            use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+            let context = crate::telemetry::extract_trace_context(&payload_wrapper.trace_context);
+            tracing::Span::current().add_link_with_attributes(
+                context.span().span_context().clone(),
+                vec![KeyValue::new("sentry.link.type", "previous_trace")],
+            );
+        }
+
+        Ok(serde_json::from_value(payload_inner)?)
     }
 
     /// Emit an event to this task's queue.
@@ -404,22 +425,13 @@ where
         )
     )]
     pub async fn emit_event<T: Serialize>(&self, event_name: &str, payload: &T) -> TaskResult<()> {
-        if event_name.is_empty() {
-            return Err(TaskError::Validation {
-                message: "event_name must be non-empty".to_string(),
-            });
-        }
-
-        let payload_json = serde_json::to_value(payload)?;
-        let query = "SELECT durable.emit_event($1, $2, $3)";
-        sqlx::query(query)
-            .bind(self.durable.queue_name())
-            .bind(event_name)
-            .bind(&payload_json)
-            .execute(self.durable.pool())
-            .await?;
-
-        Ok(())
+        self.durable
+            .emit_event(event_name, payload, None)
+            .await
+            .map_err(|e| TaskError::EmitEventFailed {
+                event_name: event_name.to_string(),
+                error: e,
+            })
     }
 
     /// Extend the task's lease to prevent timeout.
@@ -709,6 +721,8 @@ where
         let query = "SELECT should_suspend, payload
              FROM durable.await_event($1, $2, $3, $4, $5, $6)";
 
+        // This deliberately does *not* use our `await_event` wrapper, since this event is emitted
+        // by the durable sql itself (and does not use our `EventPayloadWrapper`)
         let result: AwaitEventResult = sqlx::query_as(query)
             .bind(self.durable.queue_name())
             .bind(self.task_id)
