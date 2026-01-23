@@ -130,16 +130,19 @@ begin
 
   execute format('comment on column durable.%I.state is %L', 'c_' || p_queue_name, 'User-defined. Checkpoint value from ctx.step(). Any JSON-serializable value.');
 
+  -- Event table WITH metadata column
   execute format(
     'create table if not exists durable.%I (
         event_name text primary key,
         payload jsonb,
+        metadata jsonb,
         emitted_at timestamptz not null default durable.current_time()
      )',
     'e_' || p_queue_name
   );
 
   execute format('comment on column durable.%I.payload is %L', 'e_' || p_queue_name, 'User-defined. Event payload. Internal child events use: {"status": "completed"|"failed"|"cancelled", "result"?: <json>, "error"?: <json>}');
+  execute format('comment on column durable.%I.metadata is %L', 'e_' || p_queue_name, 'System metadata (e.g., trace context for distributed tracing). Format: {"durable::otel_context": {...}}');
 
   execute format(
     'create table if not exists durable.%I (
@@ -1210,7 +1213,8 @@ create function durable.await_event (
 )
   returns table (
     should_suspend boolean,
-    payload jsonb
+    payload jsonb,
+    metadata jsonb
   )
   language plpgsql
 as $$
@@ -1219,6 +1223,7 @@ declare
   v_run_task_id uuid;
   v_existing_payload jsonb;
   v_event_payload jsonb;
+  v_event_metadata jsonb;
   v_checkpoint_payload jsonb;
   v_resolved_payload jsonb;
   v_timeout_at timestamptz;
@@ -1252,7 +1257,8 @@ begin
   using p_task_id, p_step_name;
 
   if v_checkpoint_payload is not null then
-    return query select false, v_checkpoint_payload;
+    -- Return from checkpoint without metadata (trace linking already done)
+    return query select false, v_checkpoint_payload, null::jsonb;
     return;
   end if;
   -- Ensure a row exists for this event so we can take a row-level lock.
@@ -1313,13 +1319,14 @@ begin
     raise exception 'Run "%" does not belong to task "%"', p_run_id, p_task_id;
   end if;
 
+  -- Fetch event payload and metadata
   execute format(
-    'select payload
+    'select payload, metadata
        from durable.%I
       where event_name = $1',
     'e_' || p_queue_name
   )
-  into v_event_payload
+  into v_event_payload, v_event_metadata
   using p_event_name;
 
   if v_existing_payload is not null then
@@ -1354,7 +1361,7 @@ begin
                      updated_at = excluded.updated_at',
       'c_' || p_queue_name
     ) using p_task_id, p_step_name, v_resolved_payload, p_run_id, v_now;
-    return query select false, v_resolved_payload;
+    return query select false, v_resolved_payload, v_event_metadata;
     return;
   end if;
 
@@ -1366,7 +1373,7 @@ begin
       'update durable.%I set wake_event = null where run_id = $1',
       'r_' || p_queue_name
     ) using p_run_id;
-    return query select false, null::jsonb;
+    return query select false, null::jsonb, null::jsonb;
     return;
   end if;
 
@@ -1400,7 +1407,7 @@ begin
     't_' || p_queue_name
   ) using p_task_id;
 
-  return query select true, null::jsonb;
+  return query select true, null::jsonb, null::jsonb;
   return;
 end;
 $$;
@@ -1409,7 +1416,8 @@ $$;
 create function durable.emit_event (
   p_queue_name text,
   p_event_name text,
-  p_payload jsonb default null
+  p_payload jsonb default null,
+  p_metadata jsonb default null
 )
   returns void
   language plpgsql
@@ -1428,14 +1436,16 @@ begin
   -- We use DO UPDATE WHERE payload IS NULL to handle the case where await_event
   -- created a placeholder row before emit_event ran.
   execute format(
-    'insert into durable.%I (event_name, payload, emitted_at)
-     values ($1, $2, $3)
+    'insert into durable.%I (event_name, payload, metadata, emitted_at)
+     values ($1, $2, $3, $4)
      on conflict (event_name) do update
-        set payload = excluded.payload, emitted_at = excluded.emitted_at
+        set payload = excluded.payload,
+            metadata = excluded.metadata,
+            emitted_at = excluded.emitted_at
       where durable.%I.payload is null',
     'e_' || p_queue_name,
     'e_' || p_queue_name
-  ) using p_event_name, v_payload, v_now;
+  ) using p_event_name, v_payload, p_metadata, v_now;
 
   get diagnostics v_inserted_count = row_count;
 

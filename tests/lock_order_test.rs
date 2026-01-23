@@ -260,7 +260,7 @@ async fn test_emit_event_with_lock_ordering(pool: PgPool) -> sqlx::Result<()> {
 
     // Emit the event
     let emit_query = AssertSqlSafe(
-        "SELECT durable.emit_event('lock_emit', 'test_event', '\"hello\"'::jsonb)".to_string(),
+        "SELECT durable.emit_event('lock_emit', 'test_event', '\"hello\"'::jsonb, null)".to_string(),
     );
     sqlx::query(emit_query).execute(&pool).await?;
 
@@ -334,7 +334,7 @@ async fn test_concurrent_emit_and_cancel(pool: PgPool) -> sqlx::Result<()> {
         let test_pool = test_pool.clone();
         async move {
             let emit_query = AssertSqlSafe(
-                "SELECT durable.emit_event('lock_emit_cancel', 'shared_event', '\"wakeup\"'::jsonb)"
+                "SELECT durable.emit_event('lock_emit_cancel', 'shared_event', '\"wakeup\"'::jsonb, null)"
                     .to_string(),
             );
             sqlx::query(emit_query).execute(&test_pool).await

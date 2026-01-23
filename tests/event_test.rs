@@ -1004,8 +1004,8 @@ async fn test_await_emit_event_race_does_not_lose_wakeup(pool: PgPool) -> sqlx::
     let await_handle = tokio::spawn(async move {
         let mut conn = PgConnection::connect_with(&await_opts).await?;
 
-        let result: (bool, Option<serde_json::Value>) = sqlx::query_as(
-            "SELECT should_suspend, payload FROM durable.await_event($1, $2, $3, $4, $5, $6)",
+        let result: (bool, Option<serde_json::Value>, Option<serde_json::Value>) = sqlx::query_as(
+            "SELECT should_suspend, payload, metadata FROM durable.await_event($1, $2, $3, $4, $5, $6)",
         )
         .bind(&queue_clone)
         .bind(task_id)
@@ -1016,7 +1016,7 @@ async fn test_await_emit_event_race_does_not_lose_wakeup(pool: PgPool) -> sqlx::
         .fetch_one(&mut conn)
         .await?;
 
-        Ok::<_, sqlx::Error>(result)
+        Ok::<_, sqlx::Error>((result.0, result.1))
     });
 
     // Wait until await_event is blocked on a lock (the w_<queue> row lock)
@@ -1049,10 +1049,11 @@ async fn test_await_emit_event_race_does_not_lose_wakeup(pool: PgPool) -> sqlx::
         .execute(&mut emit_conn)
         .await?;
 
-    let emit_result = sqlx::query("SELECT durable.emit_event($1, $2, $3)")
+    let emit_result = sqlx::query("SELECT durable.emit_event($1, $2, $3, $4)")
         .bind(queue)
         .bind(event_name)
         .bind(&payload)
+        .bind(None::<serde_json::Value>) // metadata
         .execute(&mut emit_conn)
         .await;
 
@@ -1080,10 +1081,11 @@ async fn test_await_emit_event_race_does_not_lose_wakeup(pool: PgPool) -> sqlx::
     assert!(got_payload.is_none(), "payload should be null on suspend");
 
     // Now emit for real; it must wake the sleeping run and create the checkpoint.
-    sqlx::query("SELECT durable.emit_event($1, $2, $3)")
+    sqlx::query("SELECT durable.emit_event($1, $2, $3, $4)")
         .bind(queue)
         .bind(event_name)
         .bind(&payload)
+        .bind(None::<serde_json::Value>) // metadata
         .execute(&pool)
         .await?;
 

@@ -276,6 +276,8 @@ pub struct SpawnResultRow {
 pub struct AwaitEventResult {
     pub should_suspend: bool,
     pub payload: Option<JsonValue>,
+    #[allow(unused)]
+    pub metadata: Option<JsonValue>,
 }
 
 /// Handle to a spawned subtask.

@@ -351,6 +351,7 @@ where
 
         // Check cache for already-received event
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
+            // No trace linking needed - already done on original receipt
             return Ok(serde_json::from_value(cached.clone())?);
         }
 
@@ -365,7 +366,7 @@ where
         // Call await_event stored procedure
         let timeout_secs = timeout.map(|d| d.as_secs() as i32);
 
-        let query = "SELECT should_suspend, payload
+        let query = "SELECT should_suspend, payload, metadata
              FROM durable.await_event($1, $2, $3, $4, $5, $6)";
 
         let result: AwaitEventResult = sqlx::query_as(query)
@@ -383,10 +384,35 @@ where
         }
 
         // Event arrived - cache and return
-        let payload = result.payload.unwrap_or(JsonValue::Null);
+        let payload_json = result.payload.unwrap_or(JsonValue::Null);
         self.checkpoint_cache
-            .insert(checkpoint_name, payload.clone());
-        Ok(serde_json::from_value(payload)?)
+            .insert(checkpoint_name, payload_json.clone());
+
+        // Link trace context if metadata is present
+        #[cfg(feature = "telemetry")]
+        if let Some(ref metadata) = result.metadata {
+            Self::link_trace_from_metadata(metadata);
+        }
+
+        Ok(serde_json::from_value(payload_json)?)
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn link_trace_from_metadata(metadata: &JsonValue) {
+        use opentelemetry::KeyValue;
+        use opentelemetry::trace::TraceContextExt;
+        use std::collections::HashMap;
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+        if let Ok(trace_context) =
+            serde_json::from_value::<HashMap<String, JsonValue>>(metadata.clone())
+        {
+            let context = crate::telemetry::extract_trace_context(&trace_context);
+            tracing::Span::current().add_link_with_attributes(
+                context.span().span_context().clone(),
+                vec![KeyValue::new("sentry.link.type", "previous_trace")],
+            );
+        }
     }
 
     /// Emit an event to this task's queue.
@@ -404,22 +430,13 @@ where
         )
     )]
     pub async fn emit_event<T: Serialize>(&self, event_name: &str, payload: &T) -> TaskResult<()> {
-        if event_name.is_empty() {
-            return Err(TaskError::Validation {
-                message: "event_name must be non-empty".to_string(),
-            });
-        }
-
-        let payload_json = serde_json::to_value(payload)?;
-        let query = "SELECT durable.emit_event($1, $2, $3)";
-        sqlx::query(query)
-            .bind(self.durable.queue_name())
-            .bind(event_name)
-            .bind(&payload_json)
-            .execute(self.durable.pool())
-            .await?;
-
-        Ok(())
+        self.durable
+            .emit_event(event_name, payload, None)
+            .await
+            .map_err(|e| TaskError::EmitEventFailed {
+                event_name: event_name.to_string(),
+                error: e,
+            })
     }
 
     /// Extend the task's lease to prevent timeout.
@@ -706,7 +723,7 @@ where
         }
 
         // Call await_event stored procedure (no timeout for join - we wait indefinitely)
-        let query = "SELECT should_suspend, payload
+        let query = "SELECT should_suspend, payload, metadata
              FROM durable.await_event($1, $2, $3, $4, $5, $6)";
 
         let result: AwaitEventResult = sqlx::query_as(query)
@@ -727,6 +744,12 @@ where
         let payload_json = result.payload.unwrap_or(JsonValue::Null);
         self.checkpoint_cache
             .insert(checkpoint_name, payload_json.clone());
+
+        // Link trace context if metadata is present
+        #[cfg(feature = "telemetry")]
+        if let Some(ref metadata) = result.metadata {
+            Self::link_trace_from_metadata(metadata);
+        }
 
         let payload: ChildCompletePayload = serde_json::from_value(payload_json)?;
         Self::process_child_payload(&step_name, payload)

@@ -686,11 +686,24 @@ where
 
         let payload_json = serde_json::to_value(payload)?;
 
-        let query = "SELECT durable.emit_event($1, $2, $3)";
+        #[allow(unused_mut)]
+        let mut metadata: Option<JsonValue> = None;
+
+        #[cfg(feature = "telemetry")]
+        {
+            let mut trace_context = HashMap::new();
+            crate::telemetry::inject_trace_context(&mut trace_context);
+            if !trace_context.is_empty() {
+                metadata = serde_json::to_value(trace_context).ok();
+            }
+        }
+
+        let query = "SELECT durable.emit_event($1, $2, $3, $4)";
         sqlx::query(query)
             .bind(queue)
             .bind(event_name)
             .bind(&payload_json)
+            .bind(&metadata)
             .execute(executor)
             .await?;
 
@@ -735,3 +748,4 @@ where
         }
     }
 }
+
