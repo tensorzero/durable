@@ -3,15 +3,15 @@ use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{RwLock, Semaphore, broadcast, mpsc};
+use tokio::sync::{Semaphore, broadcast, mpsc};
 use tokio::time::{Instant, sleep, sleep_until};
 use tracing::{Instrument, Span};
 use uuid::Uuid;
 
+use crate::Durable;
 use crate::context::TaskContext;
 use crate::error::{ControlFlow, TaskError, serialize_task_error};
-use crate::task::TaskRegistry;
-use crate::types::{ClaimedTask, ClaimedTaskRow, SpawnDefaults, WorkerOptions};
+use crate::types::{ClaimedTask, ClaimedTaskRow, WorkerOptions};
 
 /// Notifies the worker that the lease has been extended.
 /// Used by TaskContext to reset warning/fatal timers.
@@ -61,14 +61,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub(crate) async fn start<State>(
-        pool: PgPool,
-        queue_name: String,
-        registry: Arc<RwLock<TaskRegistry<State>>>,
-        options: WorkerOptions,
-        state: State,
-        spawn_defaults: SpawnDefaults,
-    ) -> Self
+    pub(crate) async fn start<State>(durable: Durable<State>, options: WorkerOptions) -> Self
     where
         State: Clone + Send + Sync + 'static,
     {
@@ -85,16 +78,7 @@ impl Worker {
             )
         });
 
-        let handle = tokio::spawn(Self::run_loop(
-            pool,
-            queue_name,
-            registry,
-            options,
-            worker_id,
-            shutdown_rx,
-            state,
-            spawn_defaults,
-        ));
+        let handle = tokio::spawn(Self::run_loop(durable, options, worker_id, shutdown_rx));
 
         Self {
             shutdown_tx,
@@ -113,14 +97,10 @@ impl Worker {
 
     #[allow(clippy::too_many_arguments)]
     async fn run_loop<State>(
-        pool: PgPool,
-        queue_name: String,
-        registry: Arc<RwLock<TaskRegistry<State>>>,
+        durable: Durable<State>,
         options: WorkerOptions,
         worker_id: String,
         mut shutdown_rx: broadcast::Receiver<()>,
-        state: State,
-        spawn_defaults: SpawnDefaults,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -132,7 +112,7 @@ impl Worker {
 
         // Mark worker as active
         #[cfg(feature = "telemetry")]
-        crate::telemetry::set_worker_active(&queue_name, &worker_id, true);
+        crate::telemetry::set_worker_active(durable.queue_name(), &worker_id, true);
 
         // Semaphore limits concurrent task execution
         let semaphore = Arc::new(Semaphore::new(concurrency));
@@ -147,7 +127,7 @@ impl Worker {
                     tracing::info!("Worker shutting down, waiting for in-flight tasks...");
 
                     #[cfg(feature = "telemetry")]
-                    crate::telemetry::set_worker_active(&queue_name, &worker_id, false);
+                    crate::telemetry::set_worker_active(durable.queue_name(), &worker_id, false);
 
                     drop(done_tx);
                     while done_rx.recv().await.is_some() {}
@@ -172,8 +152,7 @@ impl Worker {
                     }
 
                     let tasks = match Self::claim_tasks(
-                        &pool,
-                        &queue_name,
+                        &durable,
                         &worker_id,
                         claim_timeout,
                         permits.len(),
@@ -189,23 +168,14 @@ impl Worker {
                     let permits = permits.into_iter().take(tasks.len());
 
                     for (task, permit) in tasks.into_iter().zip(permits) {
-                        let pool = pool.clone();
-                        let queue_name = queue_name.clone();
-                        let registry = registry.clone();
                         let done_tx = done_tx.clone();
-                        let state = state.clone();
-                        let spawn_defaults = spawn_defaults.clone();
-
+                        let durable = durable.clone_inner();
                         tokio::spawn(async move {
                             Self::execute_task(
-                                pool,
-                                queue_name,
-                                registry,
+                                durable,
                                 task,
                                 claim_timeout,
                                 fatal_on_lease_timeout,
-                                state,
-                                spawn_defaults,
                             ).await;
 
                             drop(permit);
@@ -222,13 +192,12 @@ impl Worker {
         tracing::instrument(
             level = "debug",
             name = "durable.worker.claim_tasks",
-            skip(pool),
-            fields(queue = %queue_name, worker_id = %worker_id, count = count)
+            skip(durable),
+            fields(queue = %durable.queue_name(), worker_id = %worker_id, count = count)
         )
     )]
-    async fn claim_tasks(
-        pool: &PgPool,
-        queue_name: &str,
+    async fn claim_tasks<State: Clone + Send + Sync>(
+        durable: &Durable<State>,
         worker_id: &str,
         claim_timeout: Duration,
         count: usize,
@@ -241,11 +210,11 @@ impl Worker {
              FROM durable.claim_task($1, $2, $3, $4)";
 
         let rows: Vec<ClaimedTaskRow> = sqlx::query_as(query)
-            .bind(queue_name)
+            .bind(durable.queue_name())
             .bind(worker_id)
             .bind(claim_timeout.as_secs() as i32)
             .bind(count as i32)
-            .fetch_all(pool)
+            .fetch_all(durable.pool())
             .await?;
 
         let tasks: Vec<ClaimedTask> = rows
@@ -256,9 +225,9 @@ impl Worker {
         #[cfg(feature = "telemetry")]
         {
             let duration = start.elapsed().as_secs_f64();
-            crate::telemetry::record_task_claim_duration(queue_name, duration);
+            crate::telemetry::record_task_claim_duration(durable.queue_name(), duration);
             for _ in &tasks {
-                crate::telemetry::record_task_claimed(queue_name);
+                crate::telemetry::record_task_claimed(durable.queue_name());
             }
         }
 
@@ -267,21 +236,17 @@ impl Worker {
 
     #[allow(clippy::too_many_arguments)]
     async fn execute_task<State>(
-        pool: PgPool,
-        queue_name: String,
-        registry: Arc<RwLock<TaskRegistry<State>>>,
+        durable: Durable<State>,
         task: ClaimedTask,
         claim_timeout: Duration,
         fatal_on_lease_timeout: bool,
-        state: State,
-        spawn_defaults: SpawnDefaults,
     ) where
         State: Clone + Send + Sync + 'static,
     {
         // Create span for task execution, linked to parent trace context if available
         let span = tracing::info_span!(
             "durable.worker.execute_task",
-            queue = %queue_name,
+            queue = %durable.queue_name(),
             task_id = %task.task_id,
             run_id = %task.run_id,
             task_name = %task.task_name,
@@ -300,30 +265,17 @@ impl Worker {
             }
         }
 
-        Self::execute_task_inner(
-            pool,
-            queue_name,
-            registry,
-            task,
-            claim_timeout,
-            fatal_on_lease_timeout,
-            state,
-            spawn_defaults,
-        )
-        .instrument(span)
-        .await
+        Self::execute_task_inner(durable, task, claim_timeout, fatal_on_lease_timeout)
+            .instrument(span)
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn execute_task_inner<State>(
-        pool: PgPool,
-        queue_name: String,
-        registry: Arc<RwLock<TaskRegistry<State>>>,
+        durable: Durable<State>,
         task: ClaimedTask,
         claim_timeout: Duration,
         fatal_on_lease_timeout: bool,
-        state: State,
-        spawn_defaults: SpawnDefaults,
     ) where
         State: Clone + Send + Sync + 'static,
     {
@@ -333,7 +285,7 @@ impl Worker {
         #[cfg(feature = "telemetry")]
         let task_name = task.task_name.clone();
         #[cfg(feature = "telemetry")]
-        let queue_name_for_metrics = queue_name.clone();
+        let queue_name_for_metrics = durable.queue_name().to_string();
         let start_time = Instant::now();
 
         // Create lease extension channel - TaskContext will notify when lease is extended
@@ -342,34 +294,37 @@ impl Worker {
 
         // Create task context
         let ctx = match TaskContext::create(
-            pool.clone(),
-            queue_name.clone(),
+            durable.clone_inner(),
             task.clone(),
             claim_timeout,
             lease_extender,
-            registry.clone(),
-            state.clone(),
-            spawn_defaults,
         )
         .await
         {
             Ok(ctx) => ctx,
             Err(e) => {
                 tracing::error!("Failed to create task context: {}", e);
-                Self::fail_run(&pool, &queue_name, task.task_id, task.run_id, &e.into()).await;
+                Self::fail_run(
+                    durable.pool(),
+                    durable.queue_name(),
+                    task.task_id,
+                    task.run_id,
+                    &e.into(),
+                )
+                .await;
                 return;
             }
         };
 
         // Look up handler
-        let registry = registry.read().await;
+        let registry = durable.registry().read().await;
         let handler = match registry.get(task.task_name.as_str()) {
             Some(h) => h.clone(),
             None => {
                 tracing::error!("Unknown task: {}", task.task_name);
                 Self::fail_run(
-                    &pool,
-                    &queue_name,
+                    durable.pool(),
+                    durable.queue_name(),
                     task.task_id,
                     task.run_id,
                     &TaskError::Validation {
@@ -387,6 +342,7 @@ impl Worker {
         // all the way through to the individual task steps
         let task_handle = tokio::spawn({
             let params = task.params.clone();
+            let state = durable.state().clone();
             (async move { handler.execute(params, ctx, state).await }).instrument(Span::current())
         });
         let abort_handle = task_handle.abort_handle();
@@ -513,7 +469,14 @@ impl Worker {
                 {
                     outcome = "completed";
                 }
-                Self::complete_run(&pool, &queue_name, task.task_id, task.run_id, output).await;
+                Self::complete_run(
+                    durable.pool(),
+                    durable.queue_name(),
+                    task.task_id,
+                    task.run_id,
+                    output,
+                )
+                .await;
 
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::record_task_completed(&queue_name_for_metrics, &task_name);
@@ -541,7 +504,14 @@ impl Worker {
                     outcome = "failed";
                 }
                 tracing::error!("Task {} failed: {}", task_label, e);
-                Self::fail_run(&pool, &queue_name, task.task_id, task.run_id, e).await;
+                Self::fail_run(
+                    durable.pool(),
+                    durable.queue_name(),
+                    task.task_id,
+                    task.run_id,
+                    e,
+                )
+                .await;
 
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::record_task_failed(

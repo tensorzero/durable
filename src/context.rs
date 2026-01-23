@@ -1,18 +1,16 @@
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value as JsonValue;
-use sqlx::PgPool;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use crate::Durable;
 use crate::error::{ControlFlow, TaskError, TaskResult};
-use crate::task::{Task, TaskRegistry};
+use crate::task::Task;
 use crate::types::{
-    AwaitEventResult, CheckpointRow, ChildCompletePayload, ChildStatus, ClaimedTask, SpawnDefaults,
-    SpawnOptions, SpawnResultRow, TaskHandle,
+    AwaitEventResult, CheckpointRow, ChildCompletePayload, ChildStatus, ClaimedTask, SpawnOptions,
+    TaskHandle,
 };
 use crate::worker::LeaseExtender;
 
@@ -52,14 +50,9 @@ where
     pub attempt: i32,
 
     // Internal state
-    pool: PgPool,
-    queue_name: String,
-    #[allow(dead_code)]
+    durable: Durable<State>,
     task: ClaimedTask,
     claim_timeout: Duration,
-
-    state: State,
-
     /// Checkpoint cache: loaded on creation, updated on writes.
     checkpoint_cache: HashMap<String, JsonValue>,
 
@@ -69,12 +62,6 @@ where
 
     /// Notifies the worker when the lease is extended via step() or heartbeat().
     lease_extender: LeaseExtender,
-
-    /// Task registry for validating spawn_by_name calls.
-    registry: Arc<RwLock<TaskRegistry<State>>>,
-
-    /// Default settings for subtasks spawned via spawn/spawn_by_name.
-    spawn_defaults: SpawnDefaults,
 }
 
 /// Validate that a user-provided step name doesn't use reserved prefix.
@@ -95,23 +82,19 @@ where
     /// Loads all existing checkpoints into the cache.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn create(
-        pool: PgPool,
-        queue_name: String,
+        durable: Durable<State>,
         task: ClaimedTask,
         claim_timeout: Duration,
         lease_extender: LeaseExtender,
-        registry: Arc<RwLock<TaskRegistry<State>>>,
-        state: State,
-        spawn_defaults: SpawnDefaults,
     ) -> Result<Self, sqlx::Error> {
         // Load all checkpoints for this task into cache
         let checkpoints: Vec<CheckpointRow> = sqlx::query_as(
             "SELECT checkpoint_name, state, owner_run_id, updated_at
              FROM durable.get_task_checkpoint_states($1, $2)",
         )
-        .bind(&queue_name)
+        .bind(durable.queue_name())
         .bind(task.task_id)
-        .fetch_all(&pool)
+        .fetch_all(durable.pool())
         .await?;
 
         let mut cache = HashMap::new();
@@ -123,16 +106,12 @@ where
             task_id: task.task_id,
             run_id: task.run_id,
             attempt: task.attempt,
-            pool,
-            queue_name,
+            durable,
             task,
             claim_timeout,
             checkpoint_cache: cache,
             step_counters: HashMap::new(),
             lease_extender,
-            registry,
-            state,
-            spawn_defaults,
         })
     }
 
@@ -206,7 +185,7 @@ where
         }
 
         // Execute the step
-        let result = f(params, self.state.clone()).await?;
+        let result = f(params, self.durable.state().clone()).await?;
 
         // Persist checkpoint (also extends claim lease)
         #[cfg(feature = "telemetry")]
@@ -218,7 +197,7 @@ where
         {
             let duration = checkpoint_start.elapsed().as_secs_f64();
             crate::telemetry::record_checkpoint_duration(
-                &self.queue_name,
+                self.durable.queue_name(),
                 &self.task.task_name,
                 duration,
             );
@@ -275,13 +254,13 @@ where
         // set_task_checkpoint_state also extends the claim
         let query = "SELECT durable.set_task_checkpoint_state($1, $2, $3, $4, $5, $6)";
         sqlx::query(query)
-            .bind(&self.queue_name)
+            .bind(self.durable.queue_name())
             .bind(self.task_id)
             .bind(name)
             .bind(&state_json)
             .bind(self.run_id)
             .bind(self.claim_timeout.as_secs() as i32)
-            .execute(&self.pool)
+            .execute(self.durable.pool())
             .await?;
 
         self.checkpoint_cache.insert(name.to_string(), state_json);
@@ -315,12 +294,12 @@ where
 
         let (needs_suspend,): (bool,) =
             sqlx::query_as("SELECT durable.sleep_for($1, $2, $3, $4, $5)")
-                .bind(&self.queue_name)
+                .bind(self.durable.queue_name())
                 .bind(self.task_id)
                 .bind(self.run_id)
                 .bind(&checkpoint_name)
                 .bind(duration_ms)
-                .fetch_one(&self.pool)
+                .fetch_one(self.durable.pool())
                 .await?;
 
         if needs_suspend {
@@ -390,13 +369,13 @@ where
              FROM durable.await_event($1, $2, $3, $4, $5, $6)";
 
         let result: AwaitEventResult = sqlx::query_as(query)
-            .bind(&self.queue_name)
+            .bind(self.durable.queue_name())
             .bind(self.task_id)
             .bind(self.run_id)
             .bind(&checkpoint_name)
             .bind(event_name)
             .bind(timeout_secs)
-            .fetch_one(&self.pool)
+            .fetch_one(self.durable.pool())
             .await?;
 
         if result.should_suspend {
@@ -434,10 +413,10 @@ where
         let payload_json = serde_json::to_value(payload)?;
         let query = "SELECT durable.emit_event($1, $2, $3)";
         sqlx::query(query)
-            .bind(&self.queue_name)
+            .bind(self.durable.queue_name())
             .bind(event_name)
             .bind(&payload_json)
-            .execute(&self.pool)
+            .execute(self.durable.pool())
             .await?;
 
         Ok(())
@@ -474,10 +453,10 @@ where
 
         let query = "SELECT durable.extend_claim($1, $2, $3)";
         sqlx::query(query)
-            .bind(&self.queue_name)
+            .bind(self.durable.queue_name())
             .bind(self.run_id)
             .bind(extend_by.as_secs() as i32)
-            .execute(&self.pool)
+            .execute(self.durable.pool())
             .await?;
 
         // Notify worker that lease was extended so it can reset timers
@@ -642,82 +621,32 @@ where
         validate_user_name(name)?;
         let checkpoint_name = self.get_checkpoint_name(&format!("$spawn:{name}"), &params)?;
 
-        // Validate headers don't use reserved prefix
-        if let Some(ref headers) = options.headers {
-            for key in headers.keys() {
-                if key.starts_with("durable::") {
-                    return Err(TaskError::Validation {
-                        message: format!(
-                            "Header key '{}' uses reserved prefix 'durable::'. User headers cannot start with 'durable::'.",
-                            key
-                        ),
-                    });
-                }
-            }
-        }
-
         // Return cached task_id if already spawned
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
             let task_id: Uuid = serde_json::from_value(cached.clone())?;
             return Ok(TaskHandle::new(task_id));
         }
 
-        // Validate that the task is registered
-        {
-            let registry = self.registry.read().await;
-            if !registry.contains_key(task_name) {
-                return Err(TaskError::Validation {
-                    message: format!(
-                        "Unknown task: {}. Task must be registered before spawning.",
-                        task_name
-                    ),
-                });
-            }
-        }
-
-        // Apply defaults if not set
-        let options = SpawnOptions {
-            max_attempts: Some(
-                options
-                    .max_attempts
-                    .unwrap_or(self.spawn_defaults.max_attempts),
-            ),
-            retry_strategy: options
-                .retry_strategy
-                .or_else(|| self.spawn_defaults.retry_strategy.clone()),
-            cancellation: options
-                .cancellation
-                .or_else(|| self.spawn_defaults.cancellation.clone()),
-            ..options
-        };
-
-        // Build options JSON, merging user options with parent_task_id
-        #[derive(Serialize)]
-        struct SubtaskOptions<'a> {
-            parent_task_id: Uuid,
-            #[serde(flatten)]
-            options: &'a SpawnOptions,
-        }
-        let options_json = serde_json::to_value(SubtaskOptions {
-            parent_task_id: self.task_id,
-            options: &options,
-        })?;
-
-        let row: SpawnResultRow = sqlx::query_as(
-            "SELECT task_id, run_id, attempt FROM durable.spawn_task($1, $2, $3, $4)",
-        )
-        .bind(&self.queue_name)
-        .bind(task_name)
-        .bind(&params)
-        .bind(&options_json)
-        .fetch_one(&self.pool)
-        .await?;
-
+        let spawned_task = self
+            .durable
+            .spawn_by_name(
+                task_name,
+                params,
+                SpawnOptions {
+                    parent_task_id: Some(self.task_id),
+                    ..options
+                },
+            )
+            .await
+            .map_err(|e| TaskError::SubtaskSpawnFailed {
+                name: task_name.to_string(),
+                error: e,
+            })?;
         // Checkpoint the spawn
-        self.persist_checkpoint(&checkpoint_name, &row.task_id)
+        self.persist_checkpoint(&checkpoint_name, &spawned_task.task_id)
             .await?;
 
-        Ok(TaskHandle::new(row.task_id))
+        Ok(TaskHandle::new(spawned_task.task_id))
     }
 
     /// Wait for a subtask to complete and return its result.
@@ -781,13 +710,13 @@ where
              FROM durable.await_event($1, $2, $3, $4, $5, $6)";
 
         let result: AwaitEventResult = sqlx::query_as(query)
-            .bind(&self.queue_name)
+            .bind(self.durable.queue_name())
             .bind(self.task_id)
             .bind(self.run_id)
             .bind(&checkpoint_name)
             .bind(&event_name)
             .bind(None::<i32>) // No timeout
-            .fetch_one(&self.pool)
+            .fetch_one(self.durable.pool())
             .await?;
 
         if result.should_suspend {
@@ -837,6 +766,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
     use crate::{Durable, MIGRATOR};
+    use sqlx::PgPool;
 
     // Note that this is a 'unit' test in order to call private methods, but it still needs Postgres to be running
     #[sqlx::test(migrator = "MIGRATOR")]
@@ -849,8 +779,7 @@ mod tests {
             .expect("Failed to create Durable client");
         client.create_queue(None).await.unwrap();
         let mut ctx = TaskContext::create(
-            pool,
-            "my_test_queue".to_string(),
+            client,
             ClaimedTask {
                 task_id: Uuid::now_v7(),
                 run_id: Uuid::now_v7(),
@@ -865,13 +794,6 @@ mod tests {
             },
             Duration::from_secs(10),
             LeaseExtender::dummy_for_tests(),
-            Arc::new(RwLock::new(TaskRegistry::new())),
-            (),
-            SpawnDefaults {
-                max_attempts: 5,
-                retry_strategy: None,
-                cancellation: None,
-            },
         )
         .await
         .unwrap();

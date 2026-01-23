@@ -610,14 +610,12 @@ async fn test_reserved_prefix_error_payload(pool: PgPool) -> sqlx::Result<()> {
     client.register::<ReservedPrefixTask>().await.unwrap();
 
     let spawn_result = client
-        .spawn_with_options::<ReservedPrefixTask>(
-            (),
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::None),
-                max_attempts: Some(1),
-                ..Default::default()
-            },
-        )
+        .spawn_with_options::<ReservedPrefixTask>((), {
+            let mut opts = SpawnOptions::default();
+            opts.retry_strategy = Some(RetryStrategy::None);
+            opts.max_attempts = Some(1);
+            opts
+        })
         .await
         .expect("Failed to spawn task");
 

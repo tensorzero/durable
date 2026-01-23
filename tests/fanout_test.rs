@@ -257,13 +257,11 @@ async fn test_child_failure_propagates_to_parent(pool: PgPool) -> sqlx::Result<(
     // Spawn parent task that will spawn a failing child
     // Use max_attempts=1 for both parent and child to avoid long retry waits
     let spawn_result = client
-        .spawn_with_options::<SpawnFailingChildTask>(
-            (),
-            durable::SpawnOptions {
-                max_attempts: Some(1),
-                ..Default::default()
-            },
-        )
+        .spawn_with_options::<SpawnFailingChildTask>((), {
+            let mut opts = durable::SpawnOptions::default();
+            opts.max_attempts = Some(1);
+            opts
+        })
         .await
         .expect("Failed to spawn task");
 
@@ -383,12 +381,13 @@ async fn test_cascade_cancel_when_parent_auto_cancelled_by_max_duration(
             SpawnSlowChildParams {
                 child_sleep_ms: 10000, // 10 seconds
             },
-            SpawnOptions {
-                cancellation: Some(CancellationPolicy {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.cancellation = Some(CancellationPolicy {
                     max_pending_time: None,
                     max_running_time: Some(Duration::from_secs(2)), // 2 seconds max duration
-                }),
-                ..Default::default()
+                });
+                opts
             },
         )
         .await
@@ -623,9 +622,10 @@ async fn test_join_cancelled_child_returns_child_cancelled_error(pool: PgPool) -
             JoinCancelledChildParams {
                 child_sleep_ms: 10000, // 10 seconds - plenty of time to cancel
             },
-            durable::SpawnOptions {
-                max_attempts: Some(1),
-                ..Default::default()
+            {
+                let mut opts = durable::SpawnOptions::default();
+                opts.max_attempts = Some(1);
+                opts
             },
         )
         .await
@@ -710,13 +710,11 @@ async fn test_child_failed_error_contains_message(pool: PgPool) -> sqlx::Result<
 
     // Spawn parent task with max_attempts=1
     let spawn_result = client
-        .spawn_with_options::<SpawnFailingChildTask>(
-            (),
-            durable::SpawnOptions {
-                max_attempts: Some(1),
-                ..Default::default()
-            },
-        )
+        .spawn_with_options::<SpawnFailingChildTask>((), {
+            let mut opts = durable::SpawnOptions::default();
+            opts.max_attempts = Some(1);
+            opts
+        })
         .await
         .expect("Failed to spawn task");
 
@@ -789,9 +787,10 @@ async fn test_join_timeout_when_parent_claim_expires(pool: PgPool) -> sqlx::Resu
             SpawnSlowChildParams {
                 child_sleep_ms: 30000, // 30 seconds - much longer than claim_timeout
             },
-            durable::SpawnOptions {
-                max_attempts: Some(1),
-                ..Default::default()
+            {
+                let mut opts = durable::SpawnOptions::default();
+                opts.max_attempts = Some(1);
+                opts
             },
         )
         .await

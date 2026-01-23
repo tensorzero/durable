@@ -89,12 +89,13 @@ async fn test_fail_run_with_lock_ordering(pool: PgPool) -> sqlx::Result<()> {
             FailingParams {
                 error_message: "intentional failure".to_string(),
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(2),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(2);
+                opts
             },
         )
         .await

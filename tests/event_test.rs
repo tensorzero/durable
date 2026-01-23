@@ -163,10 +163,11 @@ async fn test_event_timeout_triggers(pool: PgPool) -> sqlx::Result<()> {
                 event_name: "never_emitted".to_string(),
                 timeout_seconds: Some(1), // 1 second timeout
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::None),
-                max_attempts: Some(1),
-                ..Default::default()
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::None);
+                opts.max_attempts = Some(1);
+                opts
             },
         )
         .await
@@ -284,12 +285,13 @@ async fn test_event_payload_preserved_on_retry(pool: PgPool) -> sqlx::Result<()>
             EventThenFailParams {
                 event_name: "retry_event".to_string(),
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::Fixed {
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
                     base_delay: Duration::from_secs(0),
-                }),
-                max_attempts: Some(2),
-                ..Default::default()
+                });
+                opts.max_attempts = Some(2);
+                opts
             },
         )
         .await
@@ -728,10 +730,11 @@ async fn test_event_timeout_error_payload(pool: PgPool) -> sqlx::Result<()> {
                 event_name: "never_arrives".to_string(),
                 timeout_seconds: Some(1),
             },
-            SpawnOptions {
-                retry_strategy: Some(RetryStrategy::None),
-                max_attempts: Some(1),
-                ..Default::default()
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::None);
+                opts.max_attempts = Some(1);
+                opts
             },
         )
         .await
