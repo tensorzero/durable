@@ -258,9 +258,9 @@ async fn test_emit_event_with_lock_ordering(pool: PgPool) -> sqlx::Result<()> {
         "Task should be sleeping waiting for event"
     );
 
-    // Emit the event
+    // Emit the event - payload must use EventPayloadWrapper format
     let emit_query = AssertSqlSafe(
-        "SELECT durable.emit_event('lock_emit', 'test_event', '\"hello\"'::jsonb)".to_string(),
+        "SELECT durable.emit_event('lock_emit', 'test_event', '{\"inner\": \"hello\", \"trace_context\": {}}'::jsonb)".to_string(),
     );
     sqlx::query(emit_query).execute(&pool).await?;
 
@@ -328,13 +328,13 @@ async fn test_concurrent_emit_and_cancel(pool: PgPool) -> sqlx::Result<()> {
         );
     }
 
-    // Cancel one task while emitting the event
+    // Cancel one task while emitting the event - payload must use EventPayloadWrapper format
     let cancel_task_id = task_ids[0];
     let emit_handle = tokio::spawn({
         let test_pool = test_pool.clone();
         async move {
             let emit_query = AssertSqlSafe(
-                "SELECT durable.emit_event('lock_emit_cancel', 'shared_event', '\"wakeup\"'::jsonb)"
+                "SELECT durable.emit_event('lock_emit_cancel', 'shared_event', '{\"inner\": \"wakeup\", \"trace_context\": {}}'::jsonb)"
                     .to_string(),
             );
             sqlx::query(emit_query).execute(&test_pool).await
