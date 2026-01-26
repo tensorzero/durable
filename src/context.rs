@@ -408,12 +408,14 @@ where
             use opentelemetry::trace::TraceContextExt;
             use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-            let metadata: HashMap<String, JsonValue> = serde_json::from_value(value.metadata)?;
-            let context = crate::telemetry::extract_trace_context(&metadata);
-            tracing::Span::current().add_link_with_attributes(
-                context.span().span_context().clone(),
-                vec![KeyValue::new("sentry.link.type", "previous_trace")],
-            );
+            let metadata: Option<HashMap<String, JsonValue>> = serde_json::from_value(value.metadata)?;
+            if let Some(metadata) = metadata {
+                let context = crate::telemetry::extract_trace_context(&metadata);
+                tracing::Span::current().add_link_with_attributes(
+                    context.span().span_context().clone(),
+                    vec![KeyValue::new("sentry.link.type", "previous_trace")],
+                );
+            }
         }
         Ok(serde_json::from_value(value.inner)?)
     }
