@@ -408,7 +408,8 @@ where
             use opentelemetry::trace::TraceContextExt;
             use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-            let metadata: Option<HashMap<String, JsonValue>> = serde_json::from_value(value.metadata)?;
+            let metadata: Option<HashMap<String, JsonValue>> =
+                serde_json::from_value(value.metadata)?;
             if let Some(metadata) = metadata {
                 let context = crate::telemetry::extract_trace_context(&metadata);
                 tracing::Span::current().add_link_with_attributes(
