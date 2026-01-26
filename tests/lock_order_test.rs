@@ -260,7 +260,8 @@ async fn test_emit_event_with_lock_ordering(pool: PgPool) -> sqlx::Result<()> {
 
     // Emit the event
     let emit_query = AssertSqlSafe(
-        "SELECT durable.emit_event('lock_emit', 'test_event', '\"hello\"'::jsonb, null)".to_string(),
+        "SELECT durable.emit_event('lock_emit', 'test_event', '\"hello\"'::jsonb, null)"
+            .to_string(),
     );
     sqlx::query(emit_query).execute(&pool).await?;
 
