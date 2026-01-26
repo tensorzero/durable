@@ -408,7 +408,8 @@ where
             use opentelemetry::trace::TraceContextExt;
             use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-            let context = crate::telemetry::extract_trace_context(&payload_wrapper.metadata);
+            let metadata: HashMap<String, JsonValue> = serde_json::from_value(value.metadata)?;
+            let context = crate::telemetry::extract_trace_context(&metadata);
             tracing::Span::current().add_link_with_attributes(
                 context.span().span_context().clone(),
                 vec![KeyValue::new("sentry.link.type", "previous_trace")],
