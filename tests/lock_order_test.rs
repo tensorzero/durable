@@ -21,7 +21,8 @@ use common::helpers::{get_task_state, single_conn_pool, wait_for_task_terminal};
 use common::tasks::{
     DoubleParams, DoubleTask, FailingParams, FailingTask, SleepParams, SleepingTask,
 };
-use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
+use durable::{Durable, DurableEventPayload, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
+use serde_json::json;
 use sqlx::postgres::{PgConnectOptions, PgConnection};
 use sqlx::{AssertSqlSafe, Connection, PgPool};
 use std::time::{Duration, Instant};
@@ -258,11 +259,18 @@ async fn test_emit_event_with_lock_ordering(pool: PgPool) -> sqlx::Result<()> {
         "Task should be sleeping waiting for event"
     );
 
-    // Emit the event
-    let emit_query = AssertSqlSafe(
-        "SELECT durable.emit_event('lock_emit', 'test_event', '\"hello\"'::jsonb)".to_string(),
-    );
-    sqlx::query(emit_query).execute(&pool).await?;
+    // Emit the event - payload must use DurableEventPayload format
+    let payload = serde_json::to_value(DurableEventPayload {
+        inner: json!("hello"),
+        metadata: json!({}),
+    })
+    .unwrap();
+    sqlx::query("SELECT durable.emit_event($1, $2, $3)")
+        .bind("lock_emit")
+        .bind("test_event")
+        .bind(&payload)
+        .execute(&pool)
+        .await?;
 
     // Wait for task to complete
     let terminal = wait_for_task_terminal(
@@ -328,16 +336,22 @@ async fn test_concurrent_emit_and_cancel(pool: PgPool) -> sqlx::Result<()> {
         );
     }
 
-    // Cancel one task while emitting the event
+    // Cancel one task while emitting the event - payload must use DurableEventPayload format
     let cancel_task_id = task_ids[0];
+    let payload = serde_json::to_value(DurableEventPayload {
+        inner: json!("wakeup"),
+        metadata: json!({}),
+    })
+    .unwrap();
     let emit_handle = tokio::spawn({
         let test_pool = test_pool.clone();
         async move {
-            let emit_query = AssertSqlSafe(
-                "SELECT durable.emit_event('lock_emit_cancel', 'shared_event', '\"wakeup\"'::jsonb)"
-                    .to_string(),
-            );
-            sqlx::query(emit_query).execute(&test_pool).await
+            sqlx::query("SELECT durable.emit_event($1, $2, $3)")
+                .bind("lock_emit_cancel")
+                .bind("shared_event")
+                .bind(&payload)
+                .execute(&test_pool)
+                .await
         }
     });
 
