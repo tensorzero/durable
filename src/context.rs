@@ -6,9 +6,9 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use crate::Durable;
-use crate::types::DurableEventPayload;
 use crate::error::{ControlFlow, TaskError, TaskResult};
 use crate::task::Task;
+use crate::types::DurableEventPayload;
 use crate::types::{
     AwaitEventResult, CheckpointRow, ChildCompletePayload, ChildStatus, ClaimedTask, SpawnOptions,
     TaskHandle,
@@ -755,7 +755,8 @@ where
             serde_json::to_value(durable_event_payload.clone())?,
         );
 
-        let child_complete_payload: ChildCompletePayload = self.process_event_payload_wrapper(durable_event_payload)?;
+        let child_complete_payload: ChildCompletePayload =
+            self.process_event_payload_wrapper(durable_event_payload)?;
         Self::process_child_payload(&step_name, child_complete_payload)
     }
 
