@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769184742769,
+  "lastUpdate": 1769710231725,
   "repoUrl": "https://github.com/tensorzero/durable",
   "entries": {
     "Criterion Benchmark": [
@@ -2849,6 +2849,156 @@ window.BENCHMARK_DATA = {
             "name": "e2e_completion/single_task_roundtrip",
             "value": 15917519,
             "range": "± 594979",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "aaron@tensorzero.com",
+            "name": "Aaron Hill",
+            "username": "Aaron1011"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3eb32595a92dce26fad069e65d33b60f9f197363",
+          "message": "Add wrapper struct to durable events and store trace context (#65)\n\n* Add wrapper struct to durable events and store trace context\n\nThis should result in Sentry displaying a link from the task\nexecution trace (where 'await_event' is called) back to the trace\nthat performed the 'emit_event' call\n\nNote that this is a *breaking change*, as we now wrap the user's payload\nin a struct when reading/writing to the database. Going forward, we'll\nbe able to add new (optional) fields to this wrapper struct without\nbreaking existing durable deployments\n\n* Run fmt\n\n* Fix metadata\n\n* Fix optional\n\n* Run fmt\n\n* Enforce that 'inner' and 'metadata' exist\n\n* Call process_event_payload_wrapper",
+          "timestamp": "2026-01-29T17:34:11Z",
+          "tree_id": "74725882b58e8cfa4b29fe048707d8f6a8f154ae",
+          "url": "https://github.com/tensorzero/durable/commit/3eb32595a92dce26fad069e65d33b60f9f197363"
+        },
+        "date": 1769710230616,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "step_cache_miss/steps/10",
+            "value": 43841161,
+            "range": "± 2236134",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/50",
+            "value": 86060190,
+            "range": "± 2694218",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/100",
+            "value": 140662007,
+            "range": "± 1529989",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/10",
+            "value": 14099556,
+            "range": "± 1325341",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/50",
+            "value": 13988951,
+            "range": "± 1403900",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/100",
+            "value": 16970356,
+            "range": "± 1907030",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1",
+            "value": 26439380,
+            "range": "± 850574",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/100",
+            "value": 24727072,
+            "range": "± 247376",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1000",
+            "value": 73196129,
+            "range": "± 5863036",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/2",
+            "value": 656767604,
+            "range": "± 13127611",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/4",
+            "value": 432637526,
+            "range": "± 7519018",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/8",
+            "value": 394947781,
+            "range": "± 8480553",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/16",
+            "value": 392344084,
+            "range": "± 5719528",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/baseline",
+            "value": 162069574,
+            "range": "± 9801371",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/contention",
+            "value": 119077160,
+            "range": "± 4992327",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "spawn_latency/single_spawn",
+            "value": 912824,
+            "range": "± 664635",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/1",
+            "value": 617256629,
+            "range": "± 5423279",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/2",
+            "value": 380023239,
+            "range": "± 2567524",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/4",
+            "value": 262143175,
+            "range": "± 4071822",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/8",
+            "value": 205763960,
+            "range": "± 1671450",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "e2e_completion/single_task_roundtrip",
+            "value": 15936612,
+            "range": "± 801195",
             "unit": "ns/iter"
           }
         ]
