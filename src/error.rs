@@ -131,7 +131,10 @@ pub enum TaskError {
     //// The user callback provided to `step` failed.
     /// We treat this as a non-deterministic error, and will retry the task
     #[error("user step `{base_name}` failed: {error}")]
-    Step { base_name: String, error: anyhow::Error },
+    Step {
+        base_name: String,
+        error: anyhow::Error,
+    },
 
     /// The task panicked.
     #[error("task panicked: {message}")]

@@ -349,8 +349,7 @@ async fn test_user_error_not_retried(pool: PgPool) -> sqlx::Result<()> {
     assert_eq!(terminal, Some("failed".to_string()));
 
     // Verify only 1 run was created - UserError should NOT trigger retry
-    let run_count =
-        count_runs_for_task(&pool, "user_error_no_retry", spawn_result.task_id).await?;
+    let run_count = count_runs_for_task(&pool, "user_error_no_retry", spawn_result.task_id).await?;
     assert_eq!(
         run_count, 1,
         "UserError should not be retried - expected 1 run, got {}",
