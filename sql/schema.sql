@@ -857,12 +857,16 @@ begin
 end;
 $$;
 
+--- Marks a run as failed.
+--- If p_force_fail is true, then the retry policy and `p_retry_at` are ignored,
+--- and the task is immediately failed (as though it had reached the max retries)
 create function durable.fail_run (
   p_queue_name text,
   p_task_id uuid,
   p_run_id uuid,
   p_reason jsonb,
-  p_retry_at timestamptz default null
+  p_retry_at timestamptz default null,
+  p_force_fail boolean default false
 )
   returns void
   language plpgsql
@@ -941,8 +945,8 @@ begin
   v_task_state_after := 'failed';
   v_recorded_attempt := v_attempt;
 
-  -- Compute the next retry time
-  if v_max_attempts is null or v_next_attempt <= v_max_attempts then
+  -- Compute the next retry time, unless we're forcing a failure
+  if (not p_force_fail) and (v_max_attempts is null or v_next_attempt <= v_max_attempts) then
     if p_retry_at is not null then
       v_next_available := p_retry_at;
     else

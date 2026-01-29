@@ -186,7 +186,13 @@ where
         }
 
         // Execute the step
-        let result = f(params, self.durable.state().clone()).await?;
+        let result =
+            f(params, self.durable.state().clone())
+                .await
+                .map_err(|e| TaskError::Step {
+                    base_name: base_name.to_string(),
+                    error: e,
+                })?;
 
         // Persist checkpoint (also extends claim lease)
         #[cfg(feature = "telemetry")]
@@ -262,7 +268,8 @@ where
             .bind(self.run_id)
             .bind(self.claim_timeout.as_secs() as i32)
             .execute(self.durable.pool())
-            .await?;
+            .await
+            .map_err(TaskError::from_sqlx_error)?;
 
         self.checkpoint_cache.insert(name.to_string(), state_json);
 
@@ -301,7 +308,8 @@ where
                 .bind(&checkpoint_name)
                 .bind(duration_ms)
                 .fetch_one(self.durable.pool())
-                .await?;
+                .await
+                .map_err(TaskError::from_sqlx_error)?;
 
         if needs_suspend {
             return Err(TaskError::Control(ControlFlow::Suspend));
@@ -379,7 +387,8 @@ where
             .bind(event_name)
             .bind(timeout_secs)
             .fetch_one(self.durable.pool())
-            .await?;
+            .await
+            .map_err(TaskError::from_sqlx_error)?;
 
         if result.should_suspend {
             return Err(TaskError::Control(ControlFlow::Suspend));
@@ -480,7 +489,8 @@ where
             .bind(self.run_id)
             .bind(extend_by.as_secs() as i32)
             .execute(self.durable.pool())
-            .await?;
+            .await
+            .map_err(TaskError::from_sqlx_error)?;
 
         // Notify worker that lease was extended so it can reset timers
         self.lease_extender.notify(extend_by);
@@ -743,7 +753,8 @@ where
             .bind(&event_name)
             .bind(None::<i32>) // No timeout
             .fetch_one(self.durable.pool())
-            .await?;
+            .await
+            .map_err(TaskError::from_sqlx_error)?;
 
         if result.should_suspend {
             return Err(TaskError::Control(ControlFlow::Suspend));

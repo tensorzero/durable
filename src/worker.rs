@@ -309,7 +309,7 @@ impl Worker {
                     durable.queue_name(),
                     task.task_id,
                     task.run_id,
-                    &e.into(),
+                    &TaskError::from_sqlx_error(e),
                 )
                 .await;
                 return;
@@ -412,8 +412,9 @@ impl Worker {
                     Ok(r) => Some(r),
                     Err(e) if e.is_cancelled() => None, // Task was aborted
                     Err(e) => {
-                        tracing::error!("Task {} panicked: {}", task_label, e);
-                        Some(Err(TaskError::TaskInternal(anyhow::anyhow!("Task panicked: {e}"))))
+                        let message = format!("Task {} panicked: {}", task_label, e);
+                        tracing::error!("{}", message);
+                        Some(Err(TaskError::TaskPanicked { message }))
                     }
                 }
             }
@@ -563,13 +564,15 @@ impl Worker {
         error: &TaskError,
     ) {
         let error_json = serialize_task_error(error);
-        let query = "SELECT durable.fail_run($1, $2, $3, $4, $5)";
+        let query = "SELECT durable.fail_run($1, $2, $3, $4, $5, $6)";
+        let force_fail = !error.retryable();
         if let Err(e) = sqlx::query(query)
             .bind(queue_name)
             .bind(task_id)
             .bind(run_id)
             .bind(&error_json)
             .bind(None::<DateTime<Utc>>)
+            .bind(force_fail)
             .execute(pool)
             .await
         {

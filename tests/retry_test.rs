@@ -3,7 +3,7 @@
 mod common;
 
 use common::helpers::{advance_time, count_runs_for_task, set_fake_time, wait_for_task_terminal};
-use common::tasks::{FailingParams, FailingTask};
+use common::tasks::{FailingParams, FailingTask, UserErrorParams, UserErrorTask};
 use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use std::time::Duration;
@@ -298,6 +298,75 @@ async fn test_max_attempts_honored(pool: PgPool) -> sqlx::Result<()> {
         .await?;
 
     assert_eq!(result.0, 3, "Task should show 3 attempts");
+
+    Ok(())
+}
+
+/// Test that a UserError (non-retryable error) does not get retried even with retry strategy.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_user_error_not_retried(pool: PgPool) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "user_error_no_retry").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<UserErrorTask>().await.unwrap();
+
+    // Spawn task WITH retry strategy configured - but UserError should still not retry
+    let spawn_result = client
+        .spawn_with_options::<UserErrorTask>(
+            UserErrorParams {
+                error_message: "User error - should not retry".to_string(),
+            },
+            {
+                let mut opts = SpawnOptions::default();
+                // Configure retry strategy that would normally allow retries
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                });
+                opts.max_attempts = Some(5); // Allow up to 5 attempts
+                opts
+            },
+        )
+        .await
+        .expect("Failed to spawn task");
+
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: Duration::from_millis(50),
+            claim_timeout: Duration::from_secs(30),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let terminal = wait_for_task_terminal(
+        &pool,
+        "user_error_no_retry",
+        spawn_result.task_id,
+        Duration::from_secs(5),
+    )
+    .await?;
+    worker.shutdown().await;
+
+    assert_eq!(terminal, Some("failed".to_string()));
+
+    // Verify only 1 run was created - UserError should NOT trigger retry
+    let run_count =
+        count_runs_for_task(&pool, "user_error_no_retry", spawn_result.task_id).await?;
+    assert_eq!(
+        run_count, 1,
+        "UserError should not be retried - expected 1 run, got {}",
+        run_count
+    );
+
+    // Verify the task's attempts counter is 1
+    let query = AssertSqlSafe(
+        "SELECT attempts FROM durable.t_user_error_no_retry WHERE task_id = $1".to_string(),
+    );
+    let result: (i32,) = sqlx::query_as(query)
+        .bind(spawn_result.task_id)
+        .fetch_one(&pool)
+        .await?;
+
+    assert_eq!(result.0, 1, "Task should show only 1 attempt");
 
     Ok(())
 }
