@@ -1012,6 +1012,43 @@ impl Task<()> for SlowNoHeartbeatTask {
 }
 
 // ============================================================================
+// SleepThenCheckpointTask - Sleep past lease then attempt a checkpoint
+// ============================================================================
+
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct SleepThenCheckpointTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SleepThenCheckpointParams {
+    /// Duration to sleep in milliseconds (should be > claim_timeout)
+    pub sleep_ms: u64,
+}
+
+#[async_trait]
+impl Task<()> for SleepThenCheckpointTask {
+    fn name(&self) -> Cow<'static, str> {
+        Cow::Borrowed("sleep-then-checkpoint")
+    }
+    type Params = SleepThenCheckpointParams;
+    type Output = String;
+
+    async fn run(
+        &self,
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
+        tokio::time::sleep(std::time::Duration::from_millis(params.sleep_ms)).await;
+        let _: String = ctx
+            .step("after-sleep", (), |_, _| async { Ok("ok".to_string()) })
+            .await?;
+        Ok("done".to_string())
+    }
+}
+
+// ============================================================================
 // CheckpointReplayTask - Tracks execution count via external counter
 // ============================================================================
 
