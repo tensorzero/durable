@@ -4,7 +4,7 @@ mod common;
 
 use common::helpers::{get_task_state, wait_for_task_terminal};
 use common::tasks::{EventEmitterParams, EventEmitterTask, EventWaitParams, EventWaitingTask};
-use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
+use durable::{Durable, DurableEventPayload, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
 use serde_json::json;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{AssertSqlSafe, Connection, PgConnection, PgPool};
@@ -939,7 +939,12 @@ async fn test_event_race_stress(pool: PgPool) -> sqlx::Result<()> {
 async fn test_await_emit_event_race_does_not_lose_wakeup(pool: PgPool) -> sqlx::Result<()> {
     let queue = "event_race_gate";
     let event_name = "race-event";
-    let payload = json!({"value": 42});
+    // Payload must use the DurableEventPayload format (inner/metadata structure)
+    let payload = serde_json::to_value(DurableEventPayload {
+        inner: json!({"value": 42}),
+        metadata: json!({}),
+    })
+    .unwrap();
 
     // Setup: Create queue, spawn task, claim it
     sqlx::query("SELECT durable.create_queue($1)")

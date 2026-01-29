@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::Durable;
 use crate::error::{ControlFlow, TaskError, TaskResult};
 use crate::task::Task;
+use crate::types::DurableEventPayload;
 use crate::types::{
     AwaitEventResult, CheckpointRow, ChildCompletePayload, ChildStatus, ClaimedTask, SpawnOptions,
     TaskHandle,
@@ -351,7 +352,9 @@ where
 
         // Check cache for already-received event
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
-            return Ok(serde_json::from_value(cached.clone())?);
+            let durable_event_payload: DurableEventPayload =
+                serde_json::from_value(cached.clone())?;
+            return self.process_event_payload_wrapper(durable_event_payload);
         }
 
         // Check if we were woken by this event but it timed out (null payload)
@@ -383,10 +386,39 @@ where
         }
 
         // Event arrived - cache and return
-        let payload = result.payload.unwrap_or(JsonValue::Null);
-        self.checkpoint_cache
-            .insert(checkpoint_name, payload.clone());
-        Ok(serde_json::from_value(payload)?)
+        let durable_event_payload = result.payload.unwrap_or(DurableEventPayload {
+            inner: JsonValue::Null,
+            metadata: JsonValue::Null,
+        });
+        self.checkpoint_cache.insert(
+            checkpoint_name,
+            serde_json::to_value(durable_event_payload.clone())?,
+        );
+
+        self.process_event_payload_wrapper(durable_event_payload)
+    }
+
+    fn process_event_payload_wrapper<T: DeserializeOwned>(
+        &self,
+        value: DurableEventPayload,
+    ) -> TaskResult<T> {
+        #[cfg(feature = "telemetry")]
+        {
+            use opentelemetry::KeyValue;
+            use opentelemetry::trace::TraceContextExt;
+            use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+            let metadata: Option<HashMap<String, JsonValue>> =
+                serde_json::from_value(value.metadata)?;
+            if let Some(metadata) = metadata {
+                let context = crate::telemetry::extract_trace_context(&metadata);
+                tracing::Span::current().add_link_with_attributes(
+                    context.span().span_context().clone(),
+                    vec![KeyValue::new("sentry.link.type", "previous_trace")],
+                );
+            }
+        }
+        Ok(serde_json::from_value(value.inner)?)
     }
 
     /// Emit an event to this task's queue.
@@ -404,22 +436,13 @@ where
         )
     )]
     pub async fn emit_event<T: Serialize>(&self, event_name: &str, payload: &T) -> TaskResult<()> {
-        if event_name.is_empty() {
-            return Err(TaskError::Validation {
-                message: "event_name must be non-empty".to_string(),
-            });
-        }
-
-        let payload_json = serde_json::to_value(payload)?;
-        let query = "SELECT durable.emit_event($1, $2, $3)";
-        sqlx::query(query)
-            .bind(self.durable.queue_name())
-            .bind(event_name)
-            .bind(&payload_json)
-            .execute(self.durable.pool())
-            .await?;
-
-        Ok(())
+        self.durable
+            .emit_event(event_name, payload, None)
+            .await
+            .map_err(|e| TaskError::EmitEventFailed {
+                event_name: event_name.to_string(),
+                error: e,
+            })
     }
 
     /// Extend the task's lease to prevent timeout.
@@ -693,8 +716,11 @@ where
 
         // Check cache for already-received event
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
-            let payload: ChildCompletePayload = serde_json::from_value(cached.clone())?;
-            return Self::process_child_payload(&step_name, payload);
+            let durable_event_payload: DurableEventPayload =
+                serde_json::from_value(cached.clone())?;
+            let child_complete_payload: ChildCompletePayload =
+                self.process_event_payload_wrapper(durable_event_payload)?;
+            return Self::process_child_payload(&step_name, child_complete_payload);
         }
 
         // Check if we were woken by this event but it timed out (null payload)
@@ -724,12 +750,18 @@ where
         }
 
         // Event arrived - parse and return
-        let payload_json = result.payload.unwrap_or(JsonValue::Null);
-        self.checkpoint_cache
-            .insert(checkpoint_name, payload_json.clone());
+        let durable_event_payload = result.payload.unwrap_or(DurableEventPayload {
+            inner: JsonValue::Null,
+            metadata: JsonValue::Null,
+        });
+        self.checkpoint_cache.insert(
+            checkpoint_name,
+            serde_json::to_value(durable_event_payload.clone())?,
+        );
 
-        let payload: ChildCompletePayload = serde_json::from_value(payload_json)?;
-        Self::process_child_payload(&step_name, payload)
+        let child_complete_payload: ChildCompletePayload =
+            self.process_event_payload_wrapper(durable_event_payload)?;
+        Self::process_child_payload(&step_name, child_complete_payload)
     }
 
     /// Process the child completion payload and return the appropriate result.

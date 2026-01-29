@@ -275,7 +275,18 @@ pub struct SpawnResultRow {
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AwaitEventResult {
     pub should_suspend: bool,
-    pub payload: Option<JsonValue>,
+    #[sqlx(json(nullable))]
+    pub payload: Option<DurableEventPayload>,
+}
+
+/// The wrapper type used for all durable events (including ones emitted from
+/// within the durable sql itself)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DurableEventPayload {
+    /// The user-defined payload passed to `emit_event`
+    pub inner: JsonValue,
+    /// Metadata attached by durable itself
+    pub metadata: JsonValue,
 }
 
 /// Handle to a spawned subtask.

@@ -792,7 +792,10 @@ begin
     perform durable.emit_event(
       p_queue_name,
       '$child:' || p_task_id::text,
-      jsonb_build_object('status', p_status) || coalesce(p_payload, '{}'::jsonb)
+      jsonb_build_object(
+        'inner', jsonb_build_object('status', p_status) || coalesce(p_payload, '{}'::jsonb),
+        'metadata', '{}'::jsonb
+      )
     );
   end if;
 
@@ -1421,6 +1424,23 @@ declare
 begin
   if p_event_name is null or length(trim(p_event_name)) = 0 then
     raise exception 'event_name must be provided';
+  end if;
+
+  -- Validate that if p_payload is not null, it has exactly the allowed keys ('inner' and 'metadata')
+  if p_payload is not null and jsonb_typeof(p_payload) = 'object' then
+    if exists (
+      select 1
+        from jsonb_object_keys(p_payload) as k
+       where k not in ('inner', 'metadata')
+    ) then
+      raise exception 'p_payload may only contain ''inner'' and ''metadata'' keys';
+    end if;
+    if not p_payload ? 'inner' then
+      raise exception 'p_payload must contain an ''inner'' key';
+    end if;
+    if not p_payload ? 'metadata' then
+      raise exception 'p_payload must contain a ''metadata'' key';
+    end if;
   end if;
 
   -- Insert the event into the events table (first-writer-wins).
