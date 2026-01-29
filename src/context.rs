@@ -718,9 +718,9 @@ where
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
             let durable_event_payload: DurableEventPayload =
                 serde_json::from_value(cached.clone())?;
-            let payload: ChildCompletePayload =
-                serde_json::from_value(durable_event_payload.inner)?;
-            return Self::process_child_payload(&step_name, payload);
+            let child_complete_payload: ChildCompletePayload =
+                self.process_event_payload_wrapper(durable_event_payload)?;
+            return Self::process_child_payload(&step_name, child_complete_payload);
         }
 
         // Check if we were woken by this event but it timed out (null payload)
