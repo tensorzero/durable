@@ -131,10 +131,50 @@ impl Task<()> for FailingTask {
     async fn run(
         &self,
         params: Self::Params,
+        mut ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
+        ctx.step(
+            "fail_task",
+            params.error_message,
+            |error_message, _| async move {
+                Err(anyhow::anyhow!("Intentional failure: {}", error_message))
+            },
+        )
+        .await
+    }
+}
+
+// ============================================================================
+// UserErrorTask - Task that emits a UserError (non-retryable)
+// ============================================================================
+
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct UserErrorTask;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserErrorParams {
+    pub error_message: String,
+}
+
+#[async_trait]
+impl Task<()> for UserErrorTask {
+    fn name(&self) -> Cow<'static, str> {
+        Cow::Borrowed("user-error")
+    }
+    type Params = UserErrorParams;
+    type Output = ();
+
+    async fn run(
+        &self,
+        params: Self::Params,
         _ctx: TaskContext,
         _state: (),
     ) -> TaskResult<Self::Output> {
-        Err(TaskError::user_message(params.error_message.to_string()))
+        // Emit a UserError directly - this should not be retried
+        Err(TaskError::user_message(params.error_message))
     }
 }
 
@@ -308,11 +348,17 @@ impl Task<()> for StepCountingTask {
             })
             .await?;
 
-        if params.fail_after_step2 {
-            return Err(TaskError::user_message(
-                "Intentional failure after step2".to_string(),
-            ));
-        }
+        ctx.step(
+            "maybe_fail",
+            params.fail_after_step2,
+            |fail_after_step2, _| async move {
+                if fail_after_step2 {
+                    return Err(anyhow::anyhow!("Intentional failure after step2"));
+                }
+                Ok(())
+            },
+        )
+        .await?;
 
         let step3_value: String = ctx
             .step("step3", (), |_, _| async {
@@ -1120,9 +1166,14 @@ impl Task<()> for DeterministicReplayTask {
                 }
             });
 
-            if should_fail {
-                return Err(TaskError::user_message("First attempt failure".to_string()));
-            }
+            // Fail within a step so that the task gets retried
+            ctx.step("maybe_fail", should_fail, |should_fail, _| async move {
+                if should_fail {
+                    return Err(anyhow::anyhow!("First attempt failure"));
+                }
+                Ok(())
+            })
+            .await?;
         }
 
         Ok(DeterministicReplayOutput {
@@ -1184,11 +1235,13 @@ impl Task<()> for EventThenFailTask {
             }
         });
 
-        if should_fail {
-            return Err(TaskError::user_message(
-                "First attempt failure after event".to_string(),
-            ));
-        }
+        ctx.step("maybe_fail", should_fail, |should_fail, _| async move {
+            if should_fail {
+                return Err(anyhow::anyhow!("First attempt failure"));
+            }
+            Ok(())
+        })
+        .await?;
 
         // Second attempt succeeds with the same payload (from checkpoint)
         Ok(payload)

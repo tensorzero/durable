@@ -833,8 +833,7 @@ async fn test_join_timeout_when_parent_claim_expires(pool: PgPool) -> sqlx::Resu
         assert!(
             error_name == Some("Timeout")
                 || error_name == Some("ChildCancelled")
-                || error_name == Some("ChildFailed")
-                || error_name == Some("TaskInternal"),
+                || error_name == Some("ChildFailed"),
             "Expected timeout-related error, got: {:?}",
             error_name
         );
