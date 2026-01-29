@@ -215,11 +215,7 @@ impl Task<()> for ChildTask {
         let mut handles = Vec::new();
         for i in 0..params.num_grandchildren {
             let handle: TaskHandle<()> = ctx
-                .spawn::<GrandchildTask>(
-                    &format!("grandchild-{}", i),
-                    (),
-                    SpawnOptions::default(),
-                )
+                .spawn::<GrandchildTask>(&format!("grandchild-{}", i), (), SpawnOptions::default())
                 .await?;
             handles.push(handle);
         }
