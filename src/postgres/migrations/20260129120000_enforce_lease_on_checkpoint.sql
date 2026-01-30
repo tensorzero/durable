@@ -54,6 +54,8 @@ begin
     using p_owner_run, p_task_id, v_now, p_extend_claim_by;
   else
     -- Touch row to lock it + validate lease even when not extending.
+    -- If the run has been cancelled then this row's state will be set to
+    -- 'failed' and this check will return null
     execute format(
       'update durable.%I
           set claim_expires_at = claim_expires_at
@@ -69,6 +71,7 @@ begin
     using p_owner_run, p_task_id, v_now;
   end if;
 
+  -- If the check above returns null then we shouldn't be running it anymore.
   if v_attempt is null then
     raise exception sqlstate 'AB002' using message = 'Task lease expired';
   end if;
