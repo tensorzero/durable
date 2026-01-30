@@ -310,6 +310,79 @@ async fn test_checkpoint_rejected_after_lease_expired(pool: PgPool) -> sqlx::Res
     Ok(())
 }
 
+/// Test that checkpoints are rejected once the lease has expired - single worker variant.
+/// Unlike the multi-worker test, this verifies that a single worker's poll loop
+/// can detect and fail the expired run after the task stops due to lease expiration.
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn test_checkpoint_rejected_after_lease_expired_single_worker(
+    pool: PgPool,
+) -> sqlx::Result<()> {
+    let client = create_client(pool.clone(), "lease_expired_single").await;
+    client.create_queue(None).await.unwrap();
+    client.register::<SleepThenCheckpointTask>().await.unwrap();
+
+    let claim_timeout = Duration::from_secs(1);
+
+    let spawn_result = client
+        .spawn_with_options::<SleepThenCheckpointTask>(
+            SleepThenCheckpointParams { sleep_ms: 1500 },
+            {
+                let mut opts = SpawnOptions::default();
+                opts.retry_strategy = Some(RetryStrategy::Fixed {
+                    base_delay: Duration::from_secs(0),
+                });
+                opts.max_attempts = Some(1);
+                opts
+            },
+        )
+        .await
+        .expect("Failed to spawn task");
+
+    // Single worker handles both running the task and detecting the expired lease
+    let worker = client
+        .start_worker(WorkerOptions {
+            poll_interval: Duration::from_millis(50),
+            claim_timeout,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let running = wait_for_task_state(
+        &pool,
+        "lease_expired_single",
+        spawn_result.task_id,
+        "running",
+        Duration::from_secs(2),
+    )
+    .await?;
+    assert!(running, "Task should enter running state");
+
+    // Wait for:
+    // 1. Lease to expire (1s)
+    // 2. Task to wake and attempt checkpoint (at 1.5s) - gets AB002 error
+    // 3. Worker's next poll to claim and fail the expired run
+    let terminal = wait_for_task_terminal(
+        &pool,
+        "lease_expired_single",
+        spawn_result.task_id,
+        Duration::from_secs(5),
+    )
+    .await?;
+    assert_eq!(terminal, Some("failed".to_string()));
+
+    let checkpoint_count =
+        get_checkpoint_count(&pool, "lease_expired_single", spawn_result.task_id).await?;
+    assert_eq!(
+        checkpoint_count, 0,
+        "Checkpoint should not be written after lease expiry"
+    );
+
+    worker.shutdown().await;
+
+    Ok(())
+}
+
 /// Test that heartbeat detects if the task has been cancelled.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_heartbeat_detects_cancellation(pool: PgPool) -> sqlx::Result<()> {
