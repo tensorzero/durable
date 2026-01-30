@@ -502,7 +502,7 @@ impl Worker {
                 // Lease expired - stop execution without double-failing the run.
                 #[cfg(feature = "telemetry")]
                 {
-                    outcome = "cancelled";
+                    outcome = "lease_expired";
                 }
                 tracing::warn!("Task {} lease expired", task_label);
             }
