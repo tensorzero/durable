@@ -135,12 +135,41 @@ pub enum TaskError {
         error_data: JsonValue,
     },
 
-    /// An internal error from user task code.
-    ///
-    /// This is the catch-all variant for errors propagated via `?` on anyhow errors.
-    /// For structured user errors, prefer using [`TaskError::user()`].
-    #[error(transparent)]
-    TaskInternal(#[from] anyhow::Error),
+    //// The user callback provided to `step` failed.
+    /// We treat this as a non-deterministic error, and will retry the task
+    #[error("user step `{base_name}` failed: {error}")]
+    Step {
+        base_name: String,
+        error: anyhow::Error,
+    },
+
+    /// The task panicked.
+    #[error("task panicked: {message}")]
+    TaskPanicked {
+        /// The error message from the task.
+        message: String,
+    },
+}
+
+impl TaskError {
+    pub fn retryable(&self) -> bool {
+        match self {
+            // These are non-deterministic errors, which might succeed on a retry
+            // (which will have the same checkpoint cache up to the point of the error)
+            TaskError::Timeout { .. } | TaskError::Database(_) | TaskError::Step { .. } => true,
+            // Everything else is considered to be a deterministic error, which will fail again
+            // on a retry
+            TaskError::SubtaskSpawnFailed { .. }
+            | TaskError::EmitEventFailed { .. }
+            | TaskError::Control(_)
+            | TaskError::Serialization(_)
+            | TaskError::ChildFailed { .. }
+            | TaskError::ChildCancelled { .. }
+            | TaskError::Validation { .. }
+            | TaskError::User { .. }
+            | TaskError::TaskPanicked { .. } => false,
+        }
+    }
 }
 
 /// Result type alias for task execution.
@@ -190,8 +219,10 @@ impl From<serde_json::Error> for TaskError {
     }
 }
 
-impl From<sqlx::Error> for TaskError {
-    fn from(err: sqlx::Error) -> Self {
+impl TaskError {
+    // This is explicitly *not* a `From<sqlx::Error> for TaskError` impl,
+    // because we don't want user code to be performing database queries directly.
+    pub(crate) fn from_sqlx_error(err: sqlx::Error) -> Self {
         if is_cancelled_error(&err) {
             TaskError::Control(ControlFlow::Cancelled)
         } else if is_lease_expired_error(&err) {
@@ -293,11 +324,17 @@ pub fn serialize_task_error(err: &TaskError) -> JsonValue {
                 "error_data": error_data,
             })
         }
-        TaskError::TaskInternal(e) => {
+        TaskError::Step { base_name, error } => {
             serde_json::json!({
-                "name": "TaskInternal",
-                "message": e.to_string(),
-                "backtrace": format!("{:?}", e)
+                "name": "Step",
+                "base_name": base_name,
+                "message": error.to_string(),
+            })
+        }
+        TaskError::TaskPanicked { message } => {
+            serde_json::json!({
+                "name": "TaskPanicked",
+                "message": message,
             })
         }
     }

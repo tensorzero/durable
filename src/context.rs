@@ -162,7 +162,7 @@ where
         tracing::instrument(
             name = "durable.task.step",
             skip(self, f, params),
-            fields(task_id = %self.task_id, step_name = %base_name)
+            fields(task_id = %self.task_id, step_name = %base_name, cached)
         )
     )]
     pub async fn step<T, P, Fut>(
@@ -180,13 +180,26 @@ where
         validate_user_name(base_name)?;
         let checkpoint_name = self.get_checkpoint_name(base_name, &params)?;
 
+        #[cfg(feature = "telemetry")]
+        let span = tracing::Span::current();
+
         // Return cached value if step was already completed
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
+            #[cfg(feature = "telemetry")]
+            span.record("cached", true);
             return Ok(serde_json::from_value(cached.clone())?);
         }
+        #[cfg(feature = "telemetry")]
+        span.record("cached", false);
 
         // Execute the step
-        let result = f(params, self.durable.state().clone()).await?;
+        let result =
+            f(params, self.durable.state().clone())
+                .await
+                .map_err(|e| TaskError::Step {
+                    base_name: base_name.to_string(),
+                    error: e,
+                })?;
 
         // Persist checkpoint (also extends claim lease)
         #[cfg(feature = "telemetry")]
@@ -262,7 +275,8 @@ where
             .bind(self.run_id)
             .bind(self.claim_timeout.as_secs() as i32)
             .execute(self.durable.pool())
-            .await?;
+            .await
+            .map_err(TaskError::from_sqlx_error)?;
 
         self.checkpoint_cache.insert(name.to_string(), state_json);
 
@@ -301,7 +315,8 @@ where
                 .bind(&checkpoint_name)
                 .bind(duration_ms)
                 .fetch_one(self.durable.pool())
-                .await?;
+                .await
+                .map_err(TaskError::from_sqlx_error)?;
 
         if needs_suspend {
             return Err(TaskError::Control(ControlFlow::Suspend));
@@ -379,7 +394,8 @@ where
             .bind(event_name)
             .bind(timeout_secs)
             .fetch_one(self.durable.pool())
-            .await?;
+            .await
+            .map_err(TaskError::from_sqlx_error)?;
 
         if result.should_suspend {
             return Err(TaskError::Control(ControlFlow::Suspend));
@@ -480,7 +496,8 @@ where
             .bind(self.run_id)
             .bind(extend_by.as_secs() as i32)
             .execute(self.durable.pool())
-            .await?;
+            .await
+            .map_err(TaskError::from_sqlx_error)?;
 
         // Notify worker that lease was extended so it can reset timers
         self.lease_extender.notify(extend_by);
@@ -743,7 +760,8 @@ where
             .bind(&event_name)
             .bind(None::<i32>) // No timeout
             .fetch_one(self.durable.pool())
-            .await?;
+            .await
+            .map_err(TaskError::from_sqlx_error)?;
 
         if result.should_suspend {
             return Err(TaskError::Control(ControlFlow::Suspend));

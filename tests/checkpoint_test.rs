@@ -116,12 +116,12 @@ async fn test_checkpoint_prevents_step_reexecution(pool: PgPool) -> sqlx::Result
 
     assert_eq!(terminal2, Some("completed".to_string()));
 
-    // Should have 3 checkpoints
+    // Should have 4 checkpoints (step1, step2, maybe_fail, step3)
     let checkpoint_count2 =
         get_checkpoint_count(&pool, "ckpt_replay2", spawn_result2.task_id).await?;
     assert_eq!(
-        checkpoint_count2, 3,
-        "Should have 3 checkpoints for all steps"
+        checkpoint_count2, 4,
+        "Should have 4 checkpoints for all steps"
     );
 
     Ok(())

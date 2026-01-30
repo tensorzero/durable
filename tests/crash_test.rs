@@ -415,9 +415,9 @@ async fn test_step_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
 
     assert_eq!(terminal, Some("completed".to_string()));
 
-    // Verify exactly 3 checkpoints (step1, step2, step3)
+    // Verify exactly 4 checkpoints (step1, step2, maybe_fail, step3)
     let checkpoint_count = get_checkpoint_count(&pool, "crash_step", spawn_result.task_id).await?;
-    assert_eq!(checkpoint_count, 3, "Should have exactly 3 checkpoints");
+    assert_eq!(checkpoint_count, 4, "Should have exactly 4 checkpoints");
 
     // Verify each checkpoint has unique name (no duplicates)
     let query = AssertSqlSafe(
@@ -429,7 +429,7 @@ async fn test_step_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
         .fetch_one(&pool)
         .await?;
 
-    assert_eq!(distinct_count, 3, "Each checkpoint name should be unique");
+    assert_eq!(distinct_count, 4, "Each checkpoint name should be unique");
 
     Ok(())
 }
