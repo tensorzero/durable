@@ -498,6 +498,14 @@ impl Worker {
                 }
                 tracing::info!("Task {} was cancelled", task_label);
             }
+            Err(TaskError::Control(ControlFlow::LeaseExpired)) => {
+                // Lease expired - stop execution without double-failing the run.
+                #[cfg(feature = "telemetry")]
+                {
+                    outcome = "lease_expired";
+                }
+                tracing::warn!("Task {} lease expired", task_label);
+            }
             Err(ref e) => {
                 // All other errors are failures (Timeout, Database, Serialization, ChildFailed, etc.)
                 #[cfg(feature = "telemetry")]

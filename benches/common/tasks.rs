@@ -1,4 +1,4 @@
-use durable::{Task, TaskContext, TaskResult, async_trait};
+use durable::{SpawnOptions, Task, TaskContext, TaskHandle, TaskResult, async_trait};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
@@ -134,5 +134,117 @@ impl Task<()> for LargePayloadBenchTask {
             )
             .await?;
         Ok(params.payload_size)
+    }
+}
+
+// ============================================================================
+// Hierarchical Tasks - Parent -> Child -> Grandchild for stress testing
+// ============================================================================
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParentParams {
+    pub num_children: u32,
+    pub grandchildren_per_child: u32,
+}
+
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct ParentTask;
+
+#[async_trait]
+impl Task<()> for ParentTask {
+    fn name(&self) -> Cow<'static, str> {
+        Cow::Borrowed("bench-parent")
+    }
+    type Params = ParentParams;
+    type Output = u32;
+
+    async fn run(
+        &self,
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
+        let mut handles = Vec::new();
+        for i in 0..params.num_children {
+            let handle: TaskHandle<u32> = ctx
+                .spawn::<ChildTask>(
+                    &format!("child-{}", i),
+                    ChildParams {
+                        num_grandchildren: params.grandchildren_per_child,
+                    },
+                    SpawnOptions::default(),
+                )
+                .await?;
+            handles.push(handle);
+        }
+
+        let mut total = 0u32;
+        for handle in handles {
+            total += ctx.join(handle).await?;
+        }
+        Ok(total)
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChildParams {
+    pub num_grandchildren: u32,
+}
+
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct ChildTask;
+
+#[async_trait]
+impl Task<()> for ChildTask {
+    fn name(&self) -> Cow<'static, str> {
+        Cow::Borrowed("bench-child")
+    }
+    type Params = ChildParams;
+    type Output = u32;
+
+    async fn run(
+        &self,
+        params: Self::Params,
+        mut ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
+        let mut handles = Vec::new();
+        for i in 0..params.num_grandchildren {
+            let handle: TaskHandle<()> = ctx
+                .spawn::<GrandchildTask>(&format!("grandchild-{}", i), (), SpawnOptions::default())
+                .await?;
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            ctx.join(handle).await?;
+        }
+        Ok(params.num_grandchildren)
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct GrandchildTask;
+
+#[async_trait]
+impl Task<()> for GrandchildTask {
+    fn name(&self) -> Cow<'static, str> {
+        Cow::Borrowed("bench-grandchild")
+    }
+    type Params = ();
+    type Output = ();
+
+    async fn run(
+        &self,
+        _params: Self::Params,
+        _ctx: TaskContext,
+        _state: (),
+    ) -> TaskResult<Self::Output> {
+        Ok(())
     }
 }

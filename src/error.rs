@@ -19,6 +19,12 @@ pub enum ControlFlow {
     /// Detected when database operations return error code AB001, indicating
     /// the task was cancelled via [`Durable::cancel_task`](crate::Durable::cancel_task).
     Cancelled,
+    /// Task lease expired (claim lost).
+    ///
+    /// Detected when database operations return error code AB002. Treated as control
+    /// flow to avoid double-failing runs that were already failed by `claim_task`,
+    /// and to let the next claim sweep fail the run if it hasn't happened yet.
+    LeaseExpired,
 }
 
 /// Error type for task execution.
@@ -28,6 +34,7 @@ pub enum ControlFlow {
 ///
 /// - `Control(Suspend)` - Task is waiting; worker does nothing (scheduler will resume it)
 /// - `Control(Cancelled)` - Task was cancelled; worker does nothing
+/// - `Control(LeaseExpired)` - Task lost its lease; worker stops without failing the run
 /// - All other variants - Actual errors; worker records failure and may retry
 ///
 /// # Example
@@ -218,6 +225,8 @@ impl TaskError {
     pub(crate) fn from_sqlx_error(err: sqlx::Error) -> Self {
         if is_cancelled_error(&err) {
             TaskError::Control(ControlFlow::Cancelled)
+        } else if is_lease_expired_error(&err) {
+            TaskError::Control(ControlFlow::LeaseExpired)
         } else {
             TaskError::Database(err)
         }
@@ -228,6 +237,15 @@ impl TaskError {
 pub fn is_cancelled_error(err: &sqlx::Error) -> bool {
     if let sqlx::Error::Database(db_err) = err {
         db_err.code().is_some_and(|c| c == "AB001")
+    } else {
+        false
+    }
+}
+
+/// Check if a sqlx error indicates lease expiration (error code AB002)
+pub fn is_lease_expired_error(err: &sqlx::Error) -> bool {
+    if let sqlx::Error::Database(db_err) = err {
+        db_err.code().is_some_and(|c| c == "AB002")
     } else {
         false
     }
