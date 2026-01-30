@@ -162,7 +162,7 @@ where
         tracing::instrument(
             name = "durable.task.step",
             skip(self, f, params),
-            fields(task_id = %self.task_id, step_name = %base_name)
+            fields(task_id = %self.task_id, step_name = %base_name, cached)
         )
     )]
     pub async fn step<T, P, Fut>(
@@ -180,10 +180,14 @@ where
         validate_user_name(base_name)?;
         let checkpoint_name = self.get_checkpoint_name(base_name, &params)?;
 
+        let span = tracing::Span::current();
+
         // Return cached value if step was already completed
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
+            span.record("cached", true);
             return Ok(serde_json::from_value(cached.clone())?);
         }
+        span.record("cached", false);
 
         // Execute the step
         let result =
