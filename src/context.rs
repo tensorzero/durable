@@ -180,13 +180,16 @@ where
         validate_user_name(base_name)?;
         let checkpoint_name = self.get_checkpoint_name(base_name, &params)?;
 
+        #[cfg(feature = "telemetry")]
         let span = tracing::Span::current();
 
         // Return cached value if step was already completed
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
+            #[cfg(feature = "telemetry")]
             span.record("cached", true);
             return Ok(serde_json::from_value(cached.clone())?);
         }
+        #[cfg(feature = "telemetry")]
         span.record("cached", false);
 
         // Execute the step
