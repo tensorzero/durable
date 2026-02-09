@@ -78,6 +78,14 @@ where
     /// Output type (must be JSON-serializable)
     type Output: Serialize + DeserializeOwned + Send;
 
+    /// Validate the parameters for this task.
+    /// This is called before spawning the task, to allow us to catch errors early.
+    /// By default, this just tries to deserialize the parameters into the `Self::Params` type.
+    fn validate_params(&self, params: JsonValue) -> Result<(), TaskError> {
+        let _typed_params: Self::Params = serde_json::from_value(params)?;
+        Ok(())
+    }
+
     /// Execute the task logic.
     ///
     /// Return `Ok(output)` on success, or `Err(TaskError)` on failure.
@@ -144,9 +152,7 @@ where
     }
 
     fn validate_params(&self, params: JsonValue) -> Result<(), TaskError> {
-        // For now, just deserialize
-        let _typed_params: T::Params = serde_json::from_value(params)?;
-        Ok(())
+        self.0.validate_params(params)
     }
 
     async fn execute(
