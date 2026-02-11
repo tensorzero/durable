@@ -253,6 +253,7 @@ impl Worker {
             attempt = task.attempt,
             // This makes things render nicely on AWS X-Ray when propagating trace contexts.
             otel.kind = "server",
+            outcome = tracing::field::Empty,
         );
 
         // Extract and set parent trace context from headers (for distributed tracing)
@@ -541,6 +542,7 @@ impl Worker {
                 outcome,
                 duration,
             );
+            Span::current().record("outcome", outcome);
         }
     }
 
