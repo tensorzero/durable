@@ -430,6 +430,13 @@ pub enum DurableError {
         /// The reason the configuration was invalid.
         reason: String,
     },
+
+    /// Database returned an unrecognized task state.
+    #[error("invalid task state: {state}")]
+    InvalidState {
+        /// The unrecognized state string.
+        state: String,
+    },
 }
 
 /// Result type alias for Client API operations.
