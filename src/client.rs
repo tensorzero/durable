@@ -765,14 +765,22 @@ where
         let status = parse_task_status(&row.state)?;
 
         let error = if status == TaskStatus::Failed {
-            row.failure_reason.as_ref().and_then(|reason| {
-                let name = reason.get("name")?.as_str()?.to_string();
-                let message = reason.get("message")?.as_str()?.to_string();
-                Some(TaskErrorInfo {
+            row.failure_reason.as_ref().map(|reason| {
+                let name = reason
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown")
+                    .to_string();
+                let message = reason
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown error")
+                    .to_string();
+                TaskErrorInfo {
                     name,
                     message,
                     raw: Some(reason.clone()),
-                })
+                }
             })
         } else {
             None
