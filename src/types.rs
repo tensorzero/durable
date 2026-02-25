@@ -346,7 +346,7 @@ pub enum TaskStatus {
 pub struct TaskErrorInfo {
     pub name: Option<String>,
     pub message: Option<String>,
-    /// The raw error data from the failure_reason column, if available.
+    /// The raw error data from the `failure_reason` column, if available.
     pub raw: Option<serde_json::Value>,
 }
 
@@ -355,13 +355,13 @@ pub struct TaskErrorInfo {
 pub struct TaskPollResult {
     pub task_id: Uuid,
     pub status: TaskStatus,
-    /// Task output (JSON), present when status is Completed.
+    /// Task output (JSON), present when status is `Completed`.
     pub output: Option<serde_json::Value>,
-    /// Error info, present when status is Failed.
+    /// Error info, present when status is `Failed`.
     pub error: Option<TaskErrorInfo>,
 }
 
-/// Internal: Row returned from get_task_result stored procedure
+/// Internal: Row returned from `get_task_result` stored procedure
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub(crate) struct TaskPollResultRow {
     pub task_id: Uuid,
