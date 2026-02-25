@@ -769,13 +769,11 @@ where
                 let name = reason
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown")
-                    .to_string();
+                    .map(String::from);
                 let message = reason
                     .get("message")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown error")
-                    .to_string();
+                    .map(String::from);
                 TaskErrorInfo {
                     name,
                     message,

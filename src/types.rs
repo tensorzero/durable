@@ -344,8 +344,8 @@ pub enum TaskStatus {
 /// Error info from a failed task.
 #[derive(Debug, Clone)]
 pub struct TaskErrorInfo {
-    pub name: String,
-    pub message: String,
+    pub name: Option<String>,
+    pub message: Option<String>,
     /// The raw error data from the failure_reason column, if available.
     pub raw: Option<serde_json::Value>,
 }

@@ -135,8 +135,13 @@ async fn test_poll_failed_task(pool: PgPool) {
     assert!(poll.output.is_none());
 
     let error = poll.error.unwrap();
-    assert_eq!(error.name, "Step");
-    assert!(error.message.contains("test failure"));
+    assert_eq!(error.name.as_deref(), Some("Step"));
+    assert!(
+        error
+            .message
+            .as_deref()
+            .is_some_and(|m| m.contains("test failure"))
+    );
 
     worker.shutdown().await;
 }
@@ -225,8 +230,8 @@ async fn test_poll_failed_task_user_error(pool: PgPool) {
     assert_eq!(poll.status, TaskStatus::Failed);
 
     let error = poll.error.unwrap();
-    assert_eq!(error.name, "User");
-    assert_eq!(error.message, "bad input");
+    assert_eq!(error.name.as_deref(), Some("User"));
+    assert_eq!(error.message.as_deref(), Some("bad input"));
 
     // Verify raw field contains the structured error_data
     let raw = error.raw.unwrap();
