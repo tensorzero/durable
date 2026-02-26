@@ -329,6 +329,47 @@ impl<T> TaskHandle<T> {
     }
 }
 
+/// Status of a durable task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskStatus {
+    Pending,
+    Running,
+    Sleeping,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+/// Error info from a failed task.
+#[derive(Debug, Clone)]
+pub struct TaskErrorInfo {
+    pub name: Option<String>,
+    pub message: Option<String>,
+    /// The raw error data from the `failure_reason` column, if available.
+    pub raw: Option<serde_json::Value>,
+}
+
+/// Result of querying a task's status and output.
+#[derive(Debug, Clone)]
+pub struct TaskPollResult {
+    pub task_id: Uuid,
+    pub status: TaskStatus,
+    /// Task output (JSON), present when status is `Completed`.
+    pub output: Option<serde_json::Value>,
+    /// Error info, present when status is `Failed`.
+    pub error: Option<TaskErrorInfo>,
+}
+
+/// Internal: Row returned from `get_task_result` stored procedure
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub(crate) struct TaskPollResultRow {
+    pub task_id: Uuid,
+    pub state: String,
+    pub completed_payload: Option<JsonValue>,
+    pub failure_reason: Option<JsonValue>,
+}
+
 /// Default settings for spawned tasks.
 ///
 /// Groups the default `max_attempts`, `retry_strategy`, and `cancellation`

@@ -12,7 +12,8 @@ use crate::error::{DurableError, DurableResult};
 use crate::task::{Task, TaskRegistry, TaskWrapper};
 use crate::types::{
     CancellationPolicy, DurableEventPayload, RetryStrategy, SpawnDefaults, SpawnOptions,
-    SpawnResult, SpawnResultRow, WorkerOptions,
+    SpawnResult, SpawnResultRow, TaskErrorInfo, TaskPollResult, TaskPollResultRow, TaskStatus,
+    WorkerOptions,
 };
 
 /// Internal struct for serializing spawn options to the database.
@@ -742,10 +743,73 @@ where
         Ok(Worker::start(self.clone_inner(), options).await)
     }
 
+    /// Get the current status and result of a task.
+    ///
+    /// Returns `None` if the task doesn't exist in this queue.
+    /// For completed tasks, includes the output payload.
+    /// For failed tasks, includes the error from the latest failed run.
+    pub async fn get_task_result(&self, task_id: Uuid) -> DurableResult<Option<TaskPollResult>> {
+        let query = "SELECT task_id, state, completed_payload, failure_reason
+                     FROM durable.get_task_result($1, $2)";
+
+        let row: Option<TaskPollResultRow> = sqlx::query_as(query)
+            .bind(self.queue_name())
+            .bind(task_id)
+            .fetch_optional(self.pool())
+            .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let status = parse_task_status(&row.state)?;
+
+        let error = if status == TaskStatus::Failed {
+            row.failure_reason.as_ref().map(|reason| {
+                let name = reason
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                let message = reason
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                TaskErrorInfo {
+                    name,
+                    message,
+                    raw: Some(reason.clone()),
+                }
+            })
+        } else {
+            None
+        };
+
+        Ok(Some(TaskPollResult {
+            task_id: row.task_id,
+            status,
+            output: row.completed_payload,
+            error,
+        }))
+    }
+
     /// Close the client. Closes the pool if owned.
     pub async fn close(self) {
         if self.owns_pool.load(Ordering::Relaxed) {
             self.pool.close().await;
         }
+    }
+}
+
+fn parse_task_status(state: &str) -> DurableResult<TaskStatus> {
+    match state {
+        "pending" => Ok(TaskStatus::Pending),
+        "running" => Ok(TaskStatus::Running),
+        "sleeping" => Ok(TaskStatus::Sleeping),
+        "completed" => Ok(TaskStatus::Completed),
+        "failed" => Ok(TaskStatus::Failed),
+        "cancelled" => Ok(TaskStatus::Cancelled),
+        other => Err(DurableError::InvalidState {
+            state: other.to_string(),
+        }),
     }
 }
