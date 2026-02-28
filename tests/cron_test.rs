@@ -80,7 +80,7 @@ async fn test_create_and_list_schedule(pool: PgPool) {
     assert_eq!(schedule.metadata.get("env"), Some(&json!("production")));
     assert_eq!(
         schedule.pgcron_job_name,
-        "durable_test_cron_create_list_payment-schedule"
+        "durable::test_cron_create_list::payment-schedule"
     );
 
     // Cleanup

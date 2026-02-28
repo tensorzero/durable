@@ -121,7 +121,7 @@ where
         validate_cron_expression(&options.cron_expression)?;
         validate_headers(&options.spawn_options.headers)?;
 
-        let pgcron_job_name = format!("durable_{}_{}", self.queue_name(), schedule_name);
+        let pgcron_job_name = format!("durable::{}::{}", self.queue_name(), schedule_name);
 
         // Build spawn options with injected durable:: headers
         let mut spawn_options = options.spawn_options.clone();
@@ -492,7 +492,9 @@ fn validate_schedule_name(name: &str) -> DurableResult<()> {
     {
         return Err(DurableError::InvalidScheduleName {
             name: name.to_string(),
-            reason: "contains invalid characters (only alphanumeric, hyphens, and underscores allowed)".to_string(),
+            reason:
+                "contains invalid characters (only alphanumeric, hyphens, and underscores allowed)"
+                    .to_string(),
         });
     }
 

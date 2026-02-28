@@ -62,7 +62,6 @@ begin
 
   delete from durable.cron_schedules where queue_name = p_queue_name;
 
-  -- Existing drop logic
   execute format('drop table if exists durable.%I cascade', 'w_' || p_queue_name);
   execute format('drop table if exists durable.%I cascade', 'e_' || p_queue_name);
   execute format('drop table if exists durable.%I cascade', 'c_' || p_queue_name);
