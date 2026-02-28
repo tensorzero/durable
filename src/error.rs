@@ -446,7 +446,7 @@ pub enum DurableError {
     },
 
     /// Cron expression failed validation.
-    #[error("invalid cron expression '{expression}': {reason}")]
+    #[error("invalid cron expression `{expression}`: {reason}")]
     InvalidCronExpression {
         /// The invalid cron expression.
         expression: String,
@@ -454,8 +454,17 @@ pub enum DurableError {
         reason: String,
     },
 
+    /// Schedule name failed validation.
+    #[error("invalid schedule name `{name}`: {reason}")]
+    InvalidScheduleName {
+        /// The invalid schedule name.
+        name: String,
+        /// Why the name is invalid.
+        reason: String,
+    },
+
     /// Schedule not found.
-    #[error("schedule '{schedule_name}' not found in queue '{queue_name}'")]
+    #[error("schedule `{schedule_name}` not found in queue `{queue_name}`")]
     ScheduleNotFound {
         /// The schedule name that was not found.
         schedule_name: String,

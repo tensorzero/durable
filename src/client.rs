@@ -334,6 +334,10 @@ where
         &self.state
     }
 
+    pub(crate) fn spawn_defaults(&self) -> &SpawnDefaults {
+        &self.spawn_defaults
+    }
+
     /// Register a task type. Required before spawning or processing.
     ///
     /// Returns an error if a task with the same name is already registered.

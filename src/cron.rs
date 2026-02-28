@@ -135,7 +135,18 @@ where
             JsonValue::String(options.cron_expression.clone()),
         );
 
-        let max_attempts = spawn_options.max_attempts.unwrap_or(5);
+        let max_attempts = spawn_options
+            .max_attempts
+            .unwrap_or(self.spawn_defaults().max_attempts);
+        let spawn_options = SpawnOptions {
+            retry_strategy: spawn_options
+                .retry_strategy
+                .or_else(|| self.spawn_defaults().retry_strategy.clone()),
+            cancellation: spawn_options
+                .cancellation
+                .or_else(|| self.spawn_defaults().cancellation.clone()),
+            ..spawn_options
+        };
         let db_options = Self::serialize_spawn_options(&spawn_options, max_attempts)
             .map_err(DurableError::Serialization)?;
 
@@ -388,12 +399,12 @@ fn validate_cron_field(
 
 fn validate_cron_part(expr: &str, part: &str, name: &str, min: u32, max: u32) -> DurableResult<()> {
     // Handle step values (e.g., "*/5" or "1-30/5")
-    let (range_part, step) = if let Some((range, step_str)) = part.split_once('/') {
+    let (range_part, _step) = if let Some((range, step_str)) = part.split_once('/') {
         let step: u32 = step_str
             .parse()
             .map_err(|_| DurableError::InvalidCronExpression {
                 expression: expr.to_string(),
-                reason: format!("invalid step value '{step_str}' in {name} field"),
+                reason: format!("invalid step value `{step_str}` in {name} field"),
             })?;
         if step == 0 {
             return Err(DurableError::InvalidCronExpression {
@@ -417,13 +428,13 @@ fn validate_cron_part(expr: &str, part: &str, name: &str, min: u32, max: u32) ->
             .parse()
             .map_err(|_| DurableError::InvalidCronExpression {
                 expression: expr.to_string(),
-                reason: format!("invalid range start '{start_str}' in {name} field"),
+                reason: format!("invalid range start `{start_str}` in {name} field"),
             })?;
         let end: u32 = end_str
             .parse()
             .map_err(|_| DurableError::InvalidCronExpression {
                 expression: expr.to_string(),
-                reason: format!("invalid range end '{end_str}' in {name} field"),
+                reason: format!("invalid range end `{end_str}` in {name} field"),
             })?;
 
         if start < min || start > max {
@@ -449,15 +460,11 @@ fn validate_cron_part(expr: &str, part: &str, name: &str, min: u32, max: u32) ->
     }
 
     // Handle single value
-    if step.is_some() && range_part == "*" {
-        return Ok(());
-    }
-
     let value: u32 = range_part
         .parse()
         .map_err(|_| DurableError::InvalidCronExpression {
             expression: expr.to_string(),
-            reason: format!("invalid value '{range_part}' in {name} field"),
+            reason: format!("invalid value `{range_part}` in {name} field"),
         })?;
 
     if value < min || value > max {
@@ -473,8 +480,8 @@ fn validate_cron_part(expr: &str, part: &str, name: &str, min: u32, max: u32) ->
 /// Validate a schedule name (alphanumeric, hyphens, underscores only; non-empty).
 fn validate_schedule_name(name: &str) -> DurableResult<()> {
     if name.is_empty() {
-        return Err(DurableError::InvalidCronExpression {
-            expression: String::new(),
+        return Err(DurableError::InvalidScheduleName {
+            name: String::new(),
             reason: "schedule name cannot be empty".to_string(),
         });
     }
@@ -483,11 +490,9 @@ fn validate_schedule_name(name: &str) -> DurableResult<()> {
         .chars()
         .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
     {
-        return Err(DurableError::InvalidCronExpression {
-            expression: String::new(),
-            reason: format!(
-                "schedule name '{name}' contains invalid characters (only alphanumeric, hyphens, and underscores allowed)"
-            ),
+        return Err(DurableError::InvalidScheduleName {
+            name: name.to_string(),
+            reason: "contains invalid characters (only alphanumeric, hyphens, and underscores allowed)".to_string(),
         });
     }
 
@@ -730,24 +735,30 @@ mod tests {
 
     #[test]
     fn test_invalid_schedule_name_empty() {
-        assert!(validate_schedule_name("").is_err());
+        let err = validate_schedule_name("").unwrap_err();
+        assert!(matches!(err, DurableError::InvalidScheduleName { .. }));
     }
 
     #[test]
     fn test_invalid_schedule_name_spaces() {
-        assert!(validate_schedule_name("my schedule").is_err());
+        let err = validate_schedule_name("my schedule").unwrap_err();
+        assert!(matches!(err, DurableError::InvalidScheduleName { .. }));
     }
 
     #[test]
     fn test_invalid_schedule_name_semicolons() {
-        assert!(validate_schedule_name("drop;table").is_err());
+        let err = validate_schedule_name("drop;table").unwrap_err();
+        assert!(matches!(err, DurableError::InvalidScheduleName { .. }));
     }
 
     #[test]
     fn test_invalid_schedule_name_special_chars() {
-        assert!(validate_schedule_name("name@here").is_err());
-        assert!(validate_schedule_name("name.here").is_err());
-        assert!(validate_schedule_name("name/here").is_err());
+        let err = validate_schedule_name("name@here").unwrap_err();
+        assert!(matches!(err, DurableError::InvalidScheduleName { .. }));
+        let err = validate_schedule_name("name.here").unwrap_err();
+        assert!(matches!(err, DurableError::InvalidScheduleName { .. }));
+        let err = validate_schedule_name("name/here").unwrap_err();
+        assert!(matches!(err, DurableError::InvalidScheduleName { .. }));
     }
 
     // --- build_pgcron_spawn_sql tests ---
