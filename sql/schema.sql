@@ -58,6 +58,26 @@ create table if not exists durable.queues (
   created_at timestamptz not null default durable.current_time()
 );
 
+create table if not exists durable.cron_schedules (
+  schedule_name text not null,
+  queue_name text not null,
+  task_name text not null,
+  cron_expression text not null,
+  params jsonb not null default '{}'::jsonb,
+  spawn_options jsonb not null default '{}'::jsonb,
+  metadata jsonb not null default '{}'::jsonb,
+  pgcron_job_name text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (queue_name, schedule_name)
+);
+
+create index if not exists idx_cron_schedules_metadata
+  on durable.cron_schedules using gin (metadata);
+
+create index if not exists idx_cron_schedules_task_name
+  on durable.cron_schedules (queue_name, task_name);
+
 create function durable.ensure_queue_tables (p_queue_name text)
   returns void
   language plpgsql
