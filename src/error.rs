@@ -437,6 +437,31 @@ pub enum DurableError {
         /// The unrecognized state string.
         state: String,
     },
+
+    /// pg_cron extension is not available in the database.
+    #[error("pg_cron is not available: {reason}")]
+    PgCronUnavailable {
+        /// Why pg_cron is not available.
+        reason: String,
+    },
+
+    /// Cron expression failed validation.
+    #[error("invalid cron expression '{expression}': {reason}")]
+    InvalidCronExpression {
+        /// The invalid cron expression.
+        expression: String,
+        /// Why the expression is invalid.
+        reason: String,
+    },
+
+    /// Schedule not found.
+    #[error("schedule '{schedule_name}' not found in queue '{queue_name}'")]
+    ScheduleNotFound {
+        /// The schedule name that was not found.
+        schedule_name: String,
+        /// The queue name that was searched.
+        queue_name: String,
+    },
 }
 
 /// Result type alias for Client API operations.
