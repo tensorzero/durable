@@ -156,7 +156,7 @@ where
             &options.task_name,
             &options.params,
             &db_options,
-        );
+        )?;
 
         let metadata_value = match &options.metadata {
             Some(m) => serde_json::to_value(m).map_err(DurableError::Serialization)?,
@@ -504,14 +504,16 @@ fn validate_schedule_name(name: &str) -> DurableResult<()> {
 // --- SQL escaping ---
 
 /// Dollar-quote a string using `$durable$` as the delimiter.
-/// Falls back to escaped single quotes if the content contains `$durable$`.
-fn pg_literal(s: &str) -> String {
-    if !s.contains("$durable$") {
-        format!("$durable${s}$durable$")
-    } else {
-        // Fallback: single-quote escaping (double up any single quotes)
-        format!("'{}'", s.replace('\'', "''"))
+/// Returns an error if the content contains `$durable`, which would break the delimiter.
+fn pg_literal(s: &str) -> Result<String, DurableError> {
+    if s.contains("$durable") {
+        return Err(DurableError::InvalidConfiguration {
+            reason: format!(
+                "string contains reserved delimiter sequence '$durable': {s}"
+            ),
+        });
     }
+    Ok(format!("$durable${s}$durable$"))
 }
 
 /// Build the SQL command that pg_cron will execute to spawn a task.
@@ -520,17 +522,17 @@ fn build_pgcron_spawn_sql(
     task_name: &str,
     params: &JsonValue,
     spawn_options: &JsonValue,
-) -> String {
+) -> Result<String, DurableError> {
     let params_str = params.to_string();
     let options_str = spawn_options.to_string();
 
-    format!(
+    Ok(format!(
         "SELECT durable.spawn_task({}, {}, {}::jsonb, {}::jsonb)",
-        pg_literal(queue_name),
-        pg_literal(task_name),
-        pg_literal(&params_str),
-        pg_literal(&options_str),
-    )
+        pg_literal(queue_name)?,
+        pg_literal(task_name)?,
+        pg_literal(&params_str)?,
+        pg_literal(&options_str)?,
+    ))
 }
 
 /// Map pgcron-related SQL errors to more descriptive error messages.
@@ -699,30 +701,33 @@ mod tests {
 
     #[test]
     fn test_pg_literal_simple() {
-        assert_eq!(pg_literal("hello"), "$durable$hello$durable$");
+        assert_eq!(pg_literal("hello").unwrap(), "$durable$hello$durable$");
     }
 
     #[test]
     fn test_pg_literal_with_single_quotes() {
-        assert_eq!(pg_literal("it's a test"), "$durable$it's a test$durable$");
+        assert_eq!(
+            pg_literal("it's a test").unwrap(),
+            "$durable$it's a test$durable$"
+        );
     }
 
     #[test]
     fn test_pg_literal_with_json() {
         let json = r#"{"key": "value"}"#;
-        assert_eq!(pg_literal(json), format!("$durable${json}$durable$"));
+        assert_eq!(pg_literal(json).unwrap(), format!("$durable${json}$durable$"));
     }
 
     #[test]
-    fn test_pg_literal_fallback_on_delimiter_conflict() {
-        let content = "contains $durable$ in it";
-        assert_eq!(pg_literal(content), "'contains $durable$ in it'");
+    fn test_pg_literal_rejects_delimiter() {
+        assert!(pg_literal("contains $durable$ in it").is_err());
     }
 
     #[test]
-    fn test_pg_literal_fallback_escapes_quotes() {
-        let content = "has $durable$ and 'quotes'";
-        assert_eq!(pg_literal(content), "'has $durable$ and ''quotes'''");
+    fn test_pg_literal_rejects_partial_delimiter() {
+        assert!(pg_literal("test$durable").is_err());
+        assert!(pg_literal("$durablefoo").is_err());
+        assert!(pg_literal("mid$durablemid").is_err());
     }
 
     // --- Schedule name validation tests ---
@@ -770,7 +775,7 @@ mod tests {
     fn test_build_pgcron_spawn_sql() {
         let params = serde_json::json!({"key": "value"});
         let options = serde_json::json!({"max_attempts": 3});
-        let sql = build_pgcron_spawn_sql("my_queue", "my_task", &params, &options);
+        let sql = build_pgcron_spawn_sql("my_queue", "my_task", &params, &options).unwrap();
         assert!(sql.contains("durable.spawn_task"));
         assert!(sql.contains("my_queue"));
         assert!(sql.contains("my_task"));
