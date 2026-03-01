@@ -67,8 +67,8 @@ create table if not exists durable.cron_schedules (
   spawn_options jsonb not null default '{}'::jsonb,
   metadata jsonb not null default '{}'::jsonb,
   pgcron_job_name text not null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
+  created_at timestamptz not null default durable.current_time(),
+  updated_at timestamptz not null default durable.current_time(),
   primary key (queue_name, schedule_name)
 );
 

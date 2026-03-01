@@ -191,7 +191,7 @@ where
         sqlx::query(
             "INSERT INTO durable.cron_schedules
                 (schedule_name, queue_name, task_name, cron_expression, params, spawn_options, metadata, pgcron_job_name, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, durable.current_time(), durable.current_time())
              ON CONFLICT (queue_name, schedule_name)
              DO UPDATE SET
                 task_name = EXCLUDED.task_name,
@@ -200,7 +200,7 @@ where
                 spawn_options = EXCLUDED.spawn_options,
                 metadata = EXCLUDED.metadata,
                 pgcron_job_name = EXCLUDED.pgcron_job_name,
-                updated_at = now()"
+                updated_at = durable.current_time()"
         )
         .bind(schedule_name)
         .bind(self.queue_name())
