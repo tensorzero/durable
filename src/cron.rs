@@ -546,6 +546,7 @@ fn map_pgcron_error(err: sqlx::Error, operation: &str) -> DurableError {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
