@@ -235,14 +235,9 @@ async fn test_create_schedule_invalid_cron() {
         metadata: None,
     };
 
-    // pg_cron validates the expression and the transaction should fail.
-    // Crucially, this should be a Database error, NOT PgCronUnavailable.
+    // pg_cron validates the expression and the transaction should fail
     let result = durable.create_schedule("bad-cron", options).await;
-    let err = result.unwrap_err();
-    assert!(
-        !matches!(err, DurableError::PgCronUnavailable { .. }),
-        "invalid cron expression should not be classified as PgCronUnavailable, got: {err:?}"
-    );
+    assert!(result.is_err());
 
     cleanup_queue(&pool, queue).await;
 }

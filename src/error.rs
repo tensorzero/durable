@@ -438,13 +438,6 @@ pub enum DurableError {
         state: String,
     },
 
-    /// pg_cron extension is not available in the database.
-    #[error("pg_cron is not available: {reason}")]
-    PgCronUnavailable {
-        /// Why pg_cron is not available.
-        reason: String,
-    },
-
     /// Schedule name failed validation.
     #[error("invalid schedule name `{name}`: {reason}")]
     InvalidScheduleName {
