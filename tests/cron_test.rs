@@ -16,6 +16,8 @@ async fn test_setup_pgcron(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_create_and_list_schedule(pool: PgPool) {
+    setup_pgcron(&pool).await.unwrap();
+
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_create_list")
@@ -63,6 +65,8 @@ async fn test_create_and_list_schedule(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_create_schedule_upsert(pool: PgPool) {
+    setup_pgcron(&pool).await.unwrap();
+
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_upsert")
@@ -111,6 +115,8 @@ async fn test_create_schedule_upsert(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_delete_schedule(pool: PgPool) {
+    setup_pgcron(&pool).await.unwrap();
+
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_delete")
@@ -171,6 +177,8 @@ async fn test_delete_nonexistent_schedule(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_create_schedule_invalid_cron(pool: PgPool) {
+    setup_pgcron(&pool).await.unwrap();
+
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_invalid")
@@ -195,6 +203,8 @@ async fn test_create_schedule_invalid_cron(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_schedule_injects_metadata_headers(pool: PgPool) {
+    setup_pgcron(&pool).await.unwrap();
+
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_headers")
@@ -234,6 +244,8 @@ async fn test_schedule_injects_metadata_headers(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_list_schedules_filter_by_metadata(pool: PgPool) {
+    setup_pgcron(&pool).await.unwrap();
+
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_filter_meta")
@@ -294,6 +306,8 @@ async fn test_list_schedules_filter_by_metadata(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_list_schedules_filter_by_task_name(pool: PgPool) {
+    setup_pgcron(&pool).await.unwrap();
+
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_filter_task")
@@ -356,6 +370,8 @@ async fn test_list_schedules_filter_by_task_name(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_list_schedules_combined_filter(pool: PgPool) {
+    setup_pgcron(&pool).await.unwrap();
+
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_filter_combo")
