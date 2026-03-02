@@ -508,9 +508,7 @@ fn validate_schedule_name(name: &str) -> DurableResult<()> {
 fn pg_literal(s: &str) -> Result<String, DurableError> {
     if s.contains("$durable") {
         return Err(DurableError::InvalidConfiguration {
-            reason: format!(
-                "string contains reserved delimiter sequence '$durable': {s}"
-            ),
+            reason: format!("string contains reserved delimiter sequence '$durable': {s}"),
         });
     }
     Ok(format!("$durable${s}$durable$"))
@@ -715,7 +713,10 @@ mod tests {
     #[test]
     fn test_pg_literal_with_json() {
         let json = r#"{"key": "value"}"#;
-        assert_eq!(pg_literal(json).unwrap(), format!("$durable${json}$durable$"));
+        assert_eq!(
+            pg_literal(json).unwrap(),
+            format!("$durable${json}$durable$")
+        );
     }
 
     #[test]
