@@ -407,7 +407,12 @@ fn build_pgcron_spawn_sql(
 /// Map pgcron-related SQL errors to more descriptive error messages.
 fn map_pgcron_error(err: sqlx::Error, operation: &str) -> DurableError {
     let err_str = err.to_string();
-    if err_str.contains("cron") || err_str.contains("pg_cron") {
+    // Only classify as PgCronUnavailable when the schema or function is missing,
+    // not when pg_cron rejects invalid input (e.g. a bad cron expression).
+    if err_str.contains("schema \"cron\" does not exist")
+        || err_str.contains("function cron.schedule")
+        || err_str.contains("function cron.unschedule")
+    {
         DurableError::PgCronUnavailable {
             reason: format!("pg_cron error during {operation}: {err_str}"),
         }
@@ -507,5 +512,67 @@ mod tests {
         assert!(sql.contains("my_queue"));
         assert!(sql.contains("my_task"));
         assert!(sql.contains("::jsonb"));
+    }
+
+    // --- map_pgcron_error tests ---
+
+    #[test]
+    fn test_map_pgcron_error_schema_missing() {
+        let err = sqlx::Error::Protocol(
+            r#"error returned from database: schema "cron" does not exist"#.to_string(),
+        );
+        let result = map_pgcron_error(err, "create");
+        assert!(
+            matches!(result, DurableError::PgCronUnavailable { .. }),
+            "expected PgCronUnavailable, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_map_pgcron_error_function_schedule_missing() {
+        let err = sqlx::Error::Protocol(
+            "error returned from database: function cron.schedule(unknown, unknown, unknown) does not exist".to_string(),
+        );
+        let result = map_pgcron_error(err, "create");
+        assert!(
+            matches!(result, DurableError::PgCronUnavailable { .. }),
+            "expected PgCronUnavailable, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_map_pgcron_error_function_unschedule_missing() {
+        let err = sqlx::Error::Protocol(
+            "error returned from database: function cron.unschedule(bigint) does not exist"
+                .to_string(),
+        );
+        let result = map_pgcron_error(err, "delete");
+        assert!(
+            matches!(result, DurableError::PgCronUnavailable { .. }),
+            "expected PgCronUnavailable, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_map_pgcron_error_invalid_cron_expression_not_misclassified() {
+        // pg_cron rejects bad cron expressions with an error containing "cron"
+        let err = sqlx::Error::Protocol(
+            "error returned from database: invalid cron expression".to_string(),
+        );
+        let result = map_pgcron_error(err, "create");
+        assert!(
+            matches!(result, DurableError::Database(_)),
+            "expected Database error, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_map_pgcron_error_unrelated_error() {
+        let err = sqlx::Error::Protocol("some other database error".to_string());
+        let result = map_pgcron_error(err, "create");
+        assert!(
+            matches!(result, DurableError::Database(_)),
+            "expected Database error, got: {result:?}"
+        );
     }
 }
