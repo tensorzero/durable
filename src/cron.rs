@@ -108,9 +108,9 @@ where
     ///
     /// Returns an error if:
     /// - The schedule name is invalid
-    /// - The cron expression is invalid
     /// - Headers use the reserved `durable::` prefix
     /// - pg_cron is not available
+    /// - The cron expression is rejected by pg_cron
     pub async fn create_schedule(
         &self,
         schedule_name: &str,
@@ -118,8 +118,19 @@ where
     ) -> DurableResult<()> {
         // Validate inputs
         validate_schedule_name(schedule_name)?;
-        validate_cron_expression(&options.cron_expression)?;
         validate_headers(&options.spawn_options.headers)?;
+
+        // Check pg_cron availability early before doing any work
+        let exists: (bool,) =
+            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_cron')")
+                .fetch_one(self.pool())
+                .await?;
+
+        if !exists.0 {
+            return Err(DurableError::PgCronUnavailable {
+                reason: "pg_cron extension is not installed".to_string(),
+            });
+        }
 
         let pgcron_job_name = format!("durable::{}::{}", self.queue_name(), schedule_name);
 
@@ -162,18 +173,6 @@ where
             Some(m) => serde_json::to_value(m).map_err(DurableError::Serialization)?,
             None => serde_json::json!({}),
         };
-
-        // Check pg_cron availability
-        let exists: (bool,) =
-            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_cron')")
-                .fetch_one(self.pool())
-                .await?;
-
-        if !exists.0 {
-            return Err(DurableError::PgCronUnavailable {
-                reason: "pg_cron extension is not installed".to_string(),
-            });
-        }
 
         // Execute in a transaction
         let mut tx = self.pool().begin().await?;
@@ -349,134 +348,6 @@ struct ScheduleRow {
 
 // --- Validation helpers ---
 
-/// Validate a 5-field standard cron expression.
-fn validate_cron_expression(expr: &str) -> DurableResult<()> {
-    let fields: Vec<&str> = expr.split_whitespace().collect();
-    if fields.len() != 5 {
-        return Err(DurableError::InvalidCronExpression {
-            expression: expr.to_string(),
-            reason: format!("expected 5 fields, got {}", fields.len()),
-        });
-    }
-
-    let field_names = ["minute", "hour", "day-of-month", "month", "day-of-week"];
-    let field_ranges: [(u32, u32); 5] = [(0, 59), (0, 23), (1, 31), (1, 12), (0, 7)];
-
-    for (i, field) in fields.iter().enumerate() {
-        validate_cron_field(
-            expr,
-            field,
-            field_names[i],
-            field_ranges[i].0,
-            field_ranges[i].1,
-        )?;
-    }
-
-    Ok(())
-}
-
-fn validate_cron_field(
-    expr: &str,
-    field: &str,
-    name: &str,
-    min: u32,
-    max: u32,
-) -> DurableResult<()> {
-    if field.is_empty() {
-        return Err(DurableError::InvalidCronExpression {
-            expression: expr.to_string(),
-            reason: format!("{name} field is empty"),
-        });
-    }
-
-    // Split by comma for lists (e.g., "1,15,30")
-    for part in field.split(',') {
-        validate_cron_part(expr, part, name, min, max)?;
-    }
-
-    Ok(())
-}
-
-fn validate_cron_part(expr: &str, part: &str, name: &str, min: u32, max: u32) -> DurableResult<()> {
-    // Handle step values (e.g., "*/5" or "1-30/5")
-    let (range_part, _step) = if let Some((range, step_str)) = part.split_once('/') {
-        let step: u32 = step_str
-            .parse()
-            .map_err(|_| DurableError::InvalidCronExpression {
-                expression: expr.to_string(),
-                reason: format!("invalid step value `{step_str}` in {name} field"),
-            })?;
-        if step == 0 {
-            return Err(DurableError::InvalidCronExpression {
-                expression: expr.to_string(),
-                reason: format!("step value cannot be 0 in {name} field"),
-            });
-        }
-        (range, Some(step))
-    } else {
-        (part, None)
-    };
-
-    // Handle wildcard
-    if range_part == "*" {
-        return Ok(());
-    }
-
-    // Handle range (e.g., "1-30")
-    if let Some((start_str, end_str)) = range_part.split_once('-') {
-        let start: u32 = start_str
-            .parse()
-            .map_err(|_| DurableError::InvalidCronExpression {
-                expression: expr.to_string(),
-                reason: format!("invalid range start `{start_str}` in {name} field"),
-            })?;
-        let end: u32 = end_str
-            .parse()
-            .map_err(|_| DurableError::InvalidCronExpression {
-                expression: expr.to_string(),
-                reason: format!("invalid range end `{end_str}` in {name} field"),
-            })?;
-
-        if start < min || start > max {
-            return Err(DurableError::InvalidCronExpression {
-                expression: expr.to_string(),
-                reason: format!("{name} range start {start} out of range {min}-{max}"),
-            });
-        }
-        if end < min || end > max {
-            return Err(DurableError::InvalidCronExpression {
-                expression: expr.to_string(),
-                reason: format!("{name} range end {end} out of range {min}-{max}"),
-            });
-        }
-        if start > end {
-            return Err(DurableError::InvalidCronExpression {
-                expression: expr.to_string(),
-                reason: format!("{name} range start {start} is greater than end {end}"),
-            });
-        }
-
-        return Ok(());
-    }
-
-    // Handle single value
-    let value: u32 = range_part
-        .parse()
-        .map_err(|_| DurableError::InvalidCronExpression {
-            expression: expr.to_string(),
-            reason: format!("invalid value `{range_part}` in {name} field"),
-        })?;
-
-    if value < min || value > max {
-        return Err(DurableError::InvalidCronExpression {
-            expression: expr.to_string(),
-            reason: format!("{name} value {value} out of range {min}-{max}"),
-        });
-    }
-
-    Ok(())
-}
-
 /// Validate a schedule name (alphanumeric, hyphens, underscores only; non-empty).
 fn validate_schedule_name(name: &str) -> DurableResult<()> {
     if name.is_empty() {
@@ -546,154 +417,9 @@ fn map_pgcron_error(err: sqlx::Error, operation: &str) -> DurableError {
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, clippy::panic)]
+#[expect(clippy::unwrap_used)]
 mod tests {
     use super::*;
-
-    // --- Cron expression validation tests ---
-
-    #[test]
-    fn test_valid_cron_every_minute() {
-        assert!(validate_cron_expression("* * * * *").is_ok());
-    }
-
-    #[test]
-    fn test_valid_cron_every_5_minutes() {
-        assert!(validate_cron_expression("*/5 * * * *").is_ok());
-    }
-
-    #[test]
-    fn test_valid_cron_range_with_step() {
-        assert!(validate_cron_expression("0-30/5 * * * *").is_ok());
-    }
-
-    #[test]
-    fn test_valid_cron_list() {
-        assert!(validate_cron_expression("1,15,30 * * * *").is_ok());
-    }
-
-    #[test]
-    fn test_valid_cron_specific_time() {
-        assert!(validate_cron_expression("0 9 * * 1").is_ok());
-    }
-
-    #[test]
-    fn test_valid_cron_complex() {
-        assert!(validate_cron_expression("30 2 1,15 * 0-5").is_ok());
-    }
-
-    #[test]
-    fn test_valid_cron_weekday_7() {
-        // 7 is valid for day-of-week (Sunday in some implementations)
-        assert!(validate_cron_expression("0 0 * * 7").is_ok());
-    }
-
-    #[test]
-    fn test_invalid_cron_too_few_fields() {
-        let result = validate_cron_expression("* * *");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        match err {
-            DurableError::InvalidCronExpression { reason, .. } => {
-                assert!(reason.contains("expected 5 fields"));
-            }
-            _ => panic!("unexpected error type"),
-        }
-    }
-
-    #[test]
-    fn test_invalid_cron_too_many_fields() {
-        let result = validate_cron_expression("* * * * * *");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        match err {
-            DurableError::InvalidCronExpression { reason, .. } => {
-                assert!(reason.contains("expected 5 fields"));
-            }
-            _ => panic!("unexpected error type"),
-        }
-    }
-
-    #[test]
-    fn test_invalid_cron_6_field_seconds() {
-        let result = validate_cron_expression("0 */5 * * * *");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_invalid_cron_out_of_range_minute() {
-        let result = validate_cron_expression("60 * * * *");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        match err {
-            DurableError::InvalidCronExpression { reason, .. } => {
-                assert!(reason.contains("out of range"));
-            }
-            _ => panic!("unexpected error type"),
-        }
-    }
-
-    #[test]
-    fn test_invalid_cron_out_of_range_hour() {
-        let result = validate_cron_expression("0 24 * * *");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_invalid_cron_out_of_range_day() {
-        let result = validate_cron_expression("0 0 32 * *");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_invalid_cron_out_of_range_month() {
-        let result = validate_cron_expression("0 0 * 13 *");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_invalid_cron_out_of_range_weekday() {
-        let result = validate_cron_expression("0 0 * * 8");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_invalid_cron_empty() {
-        let result = validate_cron_expression("");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_invalid_cron_letters() {
-        let result = validate_cron_expression("abc * * * *");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_invalid_cron_zero_step() {
-        let result = validate_cron_expression("*/0 * * * *");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        match err {
-            DurableError::InvalidCronExpression { reason, .. } => {
-                assert!(reason.contains("step value cannot be 0"));
-            }
-            _ => panic!("unexpected error type"),
-        }
-    }
-
-    #[test]
-    fn test_invalid_cron_reversed_range() {
-        let result = validate_cron_expression("30-10 * * * *");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        match err {
-            DurableError::InvalidCronExpression { reason, .. } => {
-                assert!(reason.contains("greater than end"));
-            }
-            _ => panic!("unexpected error type"),
-        }
-    }
 
     // --- pg_literal tests ---
 

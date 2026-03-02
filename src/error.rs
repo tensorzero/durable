@@ -445,15 +445,6 @@ pub enum DurableError {
         reason: String,
     },
 
-    /// Cron expression failed validation.
-    #[error("invalid cron expression `{expression}`: {reason}")]
-    InvalidCronExpression {
-        /// The invalid cron expression.
-        expression: String,
-        /// Why the expression is invalid.
-        reason: String,
-    },
-
     /// Schedule name failed validation.
     #[error("invalid schedule name `{name}`: {reason}")]
     InvalidScheduleName {

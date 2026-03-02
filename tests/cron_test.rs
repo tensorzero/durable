@@ -9,39 +9,13 @@ use serde_json::json;
 use sqlx::PgPool;
 use std::collections::HashMap;
 
-/// Check if pg_cron is available in this database. Tests that require pg_cron
-/// should call this and return early if it's not installed.
-async fn pgcron_available(pool: &PgPool) -> bool {
-    let result: Result<(bool,), _> =
-        sqlx::query_as("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_cron')")
-            .fetch_one(pool)
-            .await;
-    match result {
-        Ok((exists,)) => exists,
-        Err(_) => false,
-    }
-}
-
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_setup_pgcron(pool: PgPool) {
-    // If pg_cron extension is available, setup should succeed
-    // If not, it should return PgCronUnavailable
-    let result = setup_pgcron(&pool).await;
-    if pgcron_available(&pool).await {
-        result.unwrap();
-    } else {
-        let err = result.unwrap_err();
-        assert!(matches!(err, DurableError::PgCronUnavailable { .. }));
-    }
+    setup_pgcron(&pool).await.unwrap();
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_create_and_list_schedule(pool: PgPool) {
-    if !pgcron_available(&pool).await {
-        eprintln!("skipping test_create_and_list_schedule: pg_cron not available");
-        return;
-    }
-
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_create_list")
@@ -89,11 +63,6 @@ async fn test_create_and_list_schedule(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_create_schedule_upsert(pool: PgPool) {
-    if !pgcron_available(&pool).await {
-        eprintln!("skipping test_create_schedule_upsert: pg_cron not available");
-        return;
-    }
-
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_upsert")
@@ -142,11 +111,6 @@ async fn test_create_schedule_upsert(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_delete_schedule(pool: PgPool) {
-    if !pgcron_available(&pool).await {
-        eprintln!("skipping test_delete_schedule: pg_cron not available");
-        return;
-    }
-
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_delete")
@@ -182,11 +146,6 @@ async fn test_delete_schedule(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_delete_nonexistent_schedule(pool: PgPool) {
-    if !pgcron_available(&pool).await {
-        eprintln!("skipping test_delete_nonexistent_schedule: pg_cron not available");
-        return;
-    }
-
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_delete_missing")
@@ -229,21 +188,13 @@ async fn test_create_schedule_invalid_cron(pool: PgPool) {
         metadata: None,
     };
 
+    // pg_cron validates the expression and the transaction should fail
     let result = durable.create_schedule("bad-cron", options).await;
     assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err(),
-        DurableError::InvalidCronExpression { .. }
-    ));
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_schedule_injects_metadata_headers(pool: PgPool) {
-    if !pgcron_available(&pool).await {
-        eprintln!("skipping test_schedule_injects_metadata_headers: pg_cron not available");
-        return;
-    }
-
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_headers")
@@ -283,11 +234,6 @@ async fn test_schedule_injects_metadata_headers(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_list_schedules_filter_by_metadata(pool: PgPool) {
-    if !pgcron_available(&pool).await {
-        eprintln!("skipping test_list_schedules_filter_by_metadata: pg_cron not available");
-        return;
-    }
-
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_filter_meta")
@@ -348,11 +294,6 @@ async fn test_list_schedules_filter_by_metadata(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_list_schedules_filter_by_task_name(pool: PgPool) {
-    if !pgcron_available(&pool).await {
-        eprintln!("skipping test_list_schedules_filter_by_task_name: pg_cron not available");
-        return;
-    }
-
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_filter_task")
@@ -415,11 +356,6 @@ async fn test_list_schedules_filter_by_task_name(pool: PgPool) {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_list_schedules_combined_filter(pool: PgPool) {
-    if !pgcron_available(&pool).await {
-        eprintln!("skipping test_list_schedules_combined_filter: pg_cron not available");
-        return;
-    }
-
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_cron_filter_combo")
