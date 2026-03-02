@@ -6,21 +6,52 @@ use durable::{
     Durable, DurableError, MIGRATOR, ScheduleFilter, ScheduleOptions, SpawnOptions, setup_pgcron,
 };
 use serde_json::json;
-use sqlx::PgPool;
+use sqlx::migrate::MigrateDatabase;
+use sqlx::{AssertSqlSafe, PgPool, Row};
 use std::collections::HashMap;
 
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn test_setup_pgcron(pool: PgPool) {
+/// Connect to the real `test` database (where pg_cron lives) and run migrations.
+/// `sqlx::test` creates temporary databases where pg_cron cannot be installed,
+/// so cron tests must use the real database instead.
+async fn setup_pool() -> PgPool {
+    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+
+    // Ensure the database exists
+    if !sqlx::Postgres::database_exists(&url).await.unwrap() {
+        sqlx::Postgres::create_database(&url).await.unwrap();
+    }
+
+    let pool = PgPool::connect(&url).await.expect("connect to test db");
+    MIGRATOR.run(&pool).await.expect("run migrations");
+    setup_pgcron(&pool).await.expect("setup pg_cron");
+    pool
+}
+
+/// Clean up a queue after a test (removes cron schedules, pg_cron jobs, and queue tables).
+async fn cleanup_queue(pool: &PgPool, queue_name: &str) {
+    sqlx::query("SELECT durable.drop_queue($1)")
+        .bind(queue_name)
+        .execute(pool)
+        .await
+        .expect("cleanup queue");
+}
+
+#[tokio::test]
+async fn test_setup_pgcron() {
+    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let pool = PgPool::connect(&url).await.expect("connect to test db");
+    MIGRATOR.run(&pool).await.expect("run migrations");
     setup_pgcron(&pool).await.unwrap();
 }
 
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn test_create_and_list_schedule(pool: PgPool) {
-    setup_pgcron(&pool).await.unwrap();
+#[tokio::test]
+async fn test_create_and_list_schedule() {
+    let pool = setup_pool().await;
+    let queue = "test_cron_create_list";
 
     let durable = Durable::builder()
         .pool(pool.clone())
-        .queue_name("test_cron_create_list")
+        .queue_name(queue)
         .build()
         .await
         .unwrap();
@@ -59,17 +90,17 @@ async fn test_create_and_list_schedule(pool: PgPool) {
         "durable::test_cron_create_list::payment-schedule"
     );
 
-    // Cleanup
-    durable.delete_schedule("payment-schedule").await.unwrap();
+    cleanup_queue(&pool, queue).await;
 }
 
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn test_create_schedule_upsert(pool: PgPool) {
-    setup_pgcron(&pool).await.unwrap();
+#[tokio::test]
+async fn test_create_schedule_upsert() {
+    let pool = setup_pool().await;
+    let queue = "test_cron_upsert";
 
     let durable = Durable::builder()
         .pool(pool.clone())
-        .queue_name("test_cron_upsert")
+        .queue_name(queue)
         .build()
         .await
         .unwrap();
@@ -109,17 +140,17 @@ async fn test_create_schedule_upsert(pool: PgPool) {
     assert_eq!(schedules[0].cron_expression, "*/10 * * * *");
     assert_eq!(schedules[0].params, json!({"version": 2}));
 
-    // Cleanup
-    durable.delete_schedule("my-schedule").await.unwrap();
+    cleanup_queue(&pool, queue).await;
 }
 
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn test_delete_schedule(pool: PgPool) {
-    setup_pgcron(&pool).await.unwrap();
+#[tokio::test]
+async fn test_delete_schedule() {
+    let pool = setup_pool().await;
+    let queue = "test_cron_delete";
 
     let durable = Durable::builder()
         .pool(pool.clone())
-        .queue_name("test_cron_delete")
+        .queue_name(queue)
         .build()
         .await
         .unwrap();
@@ -148,13 +179,18 @@ async fn test_delete_schedule(pool: PgPool) {
     // Verify it's gone
     let schedules = durable.list_schedules(None).await.unwrap();
     assert_eq!(schedules.len(), 0);
+
+    cleanup_queue(&pool, queue).await;
 }
 
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn test_delete_nonexistent_schedule(pool: PgPool) {
+#[tokio::test]
+async fn test_delete_nonexistent_schedule() {
+    let pool = setup_pool().await;
+    let queue = "test_cron_delete_missing";
+
     let durable = Durable::builder()
         .pool(pool.clone())
-        .queue_name("test_cron_delete_missing")
+        .queue_name(queue)
         .build()
         .await
         .unwrap();
@@ -173,15 +209,18 @@ async fn test_delete_nonexistent_schedule(pool: PgPool) {
         }
         other => panic!("expected ScheduleNotFound, got: {other:?}"),
     }
+
+    cleanup_queue(&pool, queue).await;
 }
 
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn test_create_schedule_invalid_cron(pool: PgPool) {
-    setup_pgcron(&pool).await.unwrap();
+#[tokio::test]
+async fn test_create_schedule_invalid_cron() {
+    let pool = setup_pool().await;
+    let queue = "test_cron_invalid";
 
     let durable = Durable::builder()
         .pool(pool.clone())
-        .queue_name("test_cron_invalid")
+        .queue_name(queue)
         .build()
         .await
         .unwrap();
@@ -199,15 +238,18 @@ async fn test_create_schedule_invalid_cron(pool: PgPool) {
     // pg_cron validates the expression and the transaction should fail
     let result = durable.create_schedule("bad-cron", options).await;
     assert!(result.is_err());
+
+    cleanup_queue(&pool, queue).await;
 }
 
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn test_schedule_injects_metadata_headers(pool: PgPool) {
-    setup_pgcron(&pool).await.unwrap();
+#[tokio::test]
+async fn test_schedule_injects_metadata_headers() {
+    let pool = setup_pool().await;
+    let queue = "test_cron_headers";
 
     let durable = Durable::builder()
         .pool(pool.clone())
-        .queue_name("test_cron_headers")
+        .queue_name(queue)
         .build()
         .await
         .unwrap();
@@ -238,17 +280,17 @@ async fn test_schedule_injects_metadata_headers(pool: PgPool) {
     );
     assert_eq!(headers.get("durable::cron"), Some(&json!("0 0 * * *")));
 
-    // Cleanup
-    durable.delete_schedule("header-test").await.unwrap();
+    cleanup_queue(&pool, queue).await;
 }
 
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn test_list_schedules_filter_by_metadata(pool: PgPool) {
-    setup_pgcron(&pool).await.unwrap();
+#[tokio::test]
+async fn test_list_schedules_filter_by_metadata() {
+    let pool = setup_pool().await;
+    let queue = "test_cron_filter_meta";
 
     let durable = Durable::builder()
         .pool(pool.clone())
-        .queue_name("test_cron_filter_meta")
+        .queue_name(queue)
         .build()
         .await
         .unwrap();
@@ -299,18 +341,17 @@ async fn test_list_schedules_filter_by_metadata(pool: PgPool) {
     let all = durable.list_schedules(None).await.unwrap();
     assert_eq!(all.len(), 2);
 
-    // Cleanup
-    durable.delete_schedule("schedule-a").await.unwrap();
-    durable.delete_schedule("schedule-b").await.unwrap();
+    cleanup_queue(&pool, queue).await;
 }
 
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn test_list_schedules_filter_by_task_name(pool: PgPool) {
-    setup_pgcron(&pool).await.unwrap();
+#[tokio::test]
+async fn test_list_schedules_filter_by_task_name() {
+    let pool = setup_pool().await;
+    let queue = "test_cron_filter_task";
 
     let durable = Durable::builder()
         .pool(pool.clone())
-        .queue_name("test_cron_filter_task")
+        .queue_name(queue)
         .build()
         .await
         .unwrap();
@@ -362,19 +403,17 @@ async fn test_list_schedules_filter_by_task_name(pool: PgPool) {
     assert_eq!(schedules.len(), 1);
     assert_eq!(schedules[0].name, "reports");
 
-    // Cleanup
-    durable.delete_schedule("orders-1").await.unwrap();
-    durable.delete_schedule("orders-2").await.unwrap();
-    durable.delete_schedule("reports").await.unwrap();
+    cleanup_queue(&pool, queue).await;
 }
 
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn test_list_schedules_combined_filter(pool: PgPool) {
-    setup_pgcron(&pool).await.unwrap();
+#[tokio::test]
+async fn test_list_schedules_combined_filter() {
+    let pool = setup_pool().await;
+    let queue = "test_cron_filter_combo";
 
     let durable = Durable::builder()
         .pool(pool.clone())
-        .queue_name("test_cron_filter_combo")
+        .queue_name(queue)
         .build()
         .await
         .unwrap();
@@ -434,8 +473,68 @@ async fn test_list_schedules_combined_filter(pool: PgPool) {
     assert_eq!(schedules.len(), 1);
     assert_eq!(schedules[0].name, "data-payments");
 
-    // Cleanup
-    durable.delete_schedule("data-payments").await.unwrap();
-    durable.delete_schedule("data-billing").await.unwrap();
-    durable.delete_schedule("alerts-payments").await.unwrap();
+    cleanup_queue(&pool, queue).await;
+}
+
+#[tokio::test]
+async fn test_pgcron_job_actually_spawns_task() {
+    let pool = setup_pool().await;
+    let queue = "test_cron_fires";
+
+    let durable = Durable::builder()
+        .pool(pool.clone())
+        .queue_name(queue)
+        .build()
+        .await
+        .unwrap();
+
+    durable.create_queue(None).await.unwrap();
+
+    // Schedule a job that fires every 2 seconds
+    let options = ScheduleOptions {
+        task_name: "cron-ping".to_string(),
+        cron_expression: "2 seconds".to_string(),
+        params: json!({"source": "cron"}),
+        spawn_options: SpawnOptions::default(),
+        metadata: None,
+    };
+    durable
+        .create_schedule("fast-schedule", options)
+        .await
+        .unwrap();
+
+    // Poll the task table until pg_cron spawns at least one task (up to 3s timeout)
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(3);
+    let mut count: i64 = 0;
+    while start.elapsed() < timeout {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let row: (i64,) = sqlx::query_as(AssertSqlSafe(format!(
+            "SELECT COUNT(*) FROM durable.t_{queue}"
+        )))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        count = row.0;
+        if count > 0 {
+            break;
+        }
+    }
+
+    assert!(count > 0, "pg_cron should have spawned at least one task");
+
+    // Verify the spawned task has the right task_name and params
+    let row = sqlx::query(AssertSqlSafe(format!(
+        "SELECT task_name, params FROM durable.t_{queue} LIMIT 1"
+    )))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let task_name: &str = row.get("task_name");
+    let params: serde_json::Value = row.get("params");
+    assert_eq!(task_name, "cron-ping");
+    assert_eq!(params, json!({"source": "cron"}));
+
+    cleanup_queue(&pool, queue).await;
 }

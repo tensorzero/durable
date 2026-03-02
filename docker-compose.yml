@@ -1,11 +1,14 @@
 services:
   postgres:
+    build:
+      context: ../../tensorzero-core/tests/e2e
+      dockerfile: Dockerfile.postgres
     image: tensorzero/postgres-dev:14-trixie-slim
-    command: postgres -c shared_preload_libraries=pg_cron -c cron.database_name=test
     environment:
       POSTGRES_DB: test
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+    command: ["postgres", "-c", "cron.database_name=test"]
     ports:
       - "5436:5432"
     healthcheck:
