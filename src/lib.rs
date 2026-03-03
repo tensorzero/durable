@@ -96,6 +96,7 @@
 
 mod client;
 mod context;
+mod cron;
 mod error;
 mod task;
 #[cfg(feature = "telemetry")]
@@ -106,6 +107,7 @@ mod worker;
 // Re-export public API
 pub use client::{Durable, DurableBuilder};
 pub use context::TaskContext;
+pub use cron::{ScheduleFilter, ScheduleInfo, ScheduleOptions, setup_pgcron};
 pub use error::{ControlFlow, DurableError, DurableResult, TaskError, TaskResult};
 pub use task::{ErasedTask, Task, TaskWrapper};
 pub use types::{

@@ -437,6 +437,24 @@ pub enum DurableError {
         /// The unrecognized state string.
         state: String,
     },
+
+    /// Schedule name failed validation.
+    #[error("invalid schedule name `{name}`: {reason}")]
+    InvalidScheduleName {
+        /// The invalid schedule name.
+        name: String,
+        /// Why the name is invalid.
+        reason: String,
+    },
+
+    /// Schedule not found.
+    #[error("schedule `{schedule_name}` not found in queue `{queue_name}`")]
+    ScheduleNotFound {
+        /// The schedule name that was not found.
+        schedule_name: String,
+        /// The queue name that was searched.
+        queue_name: String,
+    },
 }
 
 /// Result type alias for Client API operations.

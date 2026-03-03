@@ -55,7 +55,7 @@ impl CancellationPolicyDb {
 use crate::worker::Worker;
 
 /// Validates that user-provided headers don't use reserved prefixes.
-fn validate_headers(headers: &Option<HashMap<String, JsonValue>>) -> DurableResult<()> {
+pub(crate) fn validate_headers(headers: &Option<HashMap<String, JsonValue>>) -> DurableResult<()> {
     if let Some(headers) = headers {
         for key in headers.keys() {
             if key.starts_with("durable::") {
@@ -334,6 +334,10 @@ where
         &self.state
     }
 
+    pub(crate) fn spawn_defaults(&self) -> &SpawnDefaults {
+        &self.spawn_defaults
+    }
+
     /// Register a task type. Required before spawning or processing.
     ///
     /// Returns an error if a task with the same name is already registered.
@@ -578,7 +582,7 @@ where
         })
     }
 
-    fn serialize_spawn_options(
+    pub(crate) fn serialize_spawn_options(
         options: &SpawnOptions,
         max_attempts: u32,
     ) -> serde_json::Result<JsonValue> {
