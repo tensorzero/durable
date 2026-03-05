@@ -13,15 +13,10 @@ use common::tasks::{
     CpuBoundParams, CpuBoundTask, LongRunningHeartbeatParams, LongRunningHeartbeatTask,
     SlowNoHeartbeatParams, SlowNoHeartbeatTask, StepCountingParams, StepCountingTask,
 };
-use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
+use durable::{Durable, DurableBuilder, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
 
-async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
-    Durable::builder()
-        .pool(pool)
-        .queue_name(queue_name)
-        .build()
-        .await
-        .expect("Failed to create Durable client")
+fn create_client(pool: PgPool, queue_name: &str) -> DurableBuilder {
+    Durable::builder().pool(pool).queue_name(queue_name)
 }
 
 // ============================================================================
@@ -31,9 +26,13 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 /// Test that a task resumes from checkpoint after a worker crash.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_crash_mid_step_resumes_from_checkpoint(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "crash_ckpt").await;
+    let client = create_client(pool.clone(), "crash_ckpt")
+        .register::<StepCountingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<StepCountingTask>().await.unwrap();
 
     // Spawn a task that will fail after step 2
     let spawn_result = client
@@ -114,9 +113,13 @@ async fn test_crash_mid_step_resumes_from_checkpoint(pool: PgPool) -> sqlx::Resu
 /// Uses real time delays since fake time only affects database, not worker's tokio timing.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_worker_drop_without_shutdown(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "crash_drop").await;
+    let client = create_client(pool.clone(), "crash_drop")
+        .register::<SlowNoHeartbeatTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SlowNoHeartbeatTask>().await.unwrap();
 
     let claim_timeout = Duration::from_secs(2); // 2 second lease
 
@@ -184,9 +187,13 @@ async fn test_worker_drop_without_shutdown(pool: PgPool) -> sqlx::Result<()> {
 /// Test that a new worker can claim a task after the original worker's lease expires.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "crash_lease").await;
+    let client = create_client(pool.clone(), "crash_lease")
+        .register::<LongRunningHeartbeatTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -253,9 +260,13 @@ async fn test_lease_expiration_allows_reclaim(pool: PgPool) -> sqlx::Result<()> 
 /// Test that heartbeats prevent lease expiration for long-running tasks.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_heartbeat_prevents_lease_expiration(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "crash_hb").await;
+    let client = create_client(pool.clone(), "crash_hb")
+        .register::<LongRunningHeartbeatTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
     let claim_timeout = Duration::from_secs(2); // 2 second lease
 
@@ -307,10 +318,15 @@ async fn test_spawn_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
     tracing_subscriber::fmt::init();
     use common::tasks::{DoubleTask, SingleSpawnParams, SingleSpawnTask};
 
-    let client = create_client(pool.clone(), "crash_spawn").await;
+    let client = create_client(pool.clone(), "crash_spawn")
+        .register::<SingleSpawnTask>()
+        .unwrap()
+        .register::<DoubleTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SingleSpawnTask>().await.unwrap();
-    client.register::<DoubleTask>().await.unwrap(); // Child task type
 
     // Spawn parent task that spawns a child
     let spawn_result = client
@@ -371,9 +387,13 @@ async fn test_spawn_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
 /// Test that steps are idempotent after retry.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_step_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "crash_step").await;
+    let client = create_client(pool.clone(), "crash_step")
+        .register::<StepCountingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<StepCountingTask>().await.unwrap();
 
     // Spawn task that fails after step 2, then succeeds on retry
     // But fail_after_step2 is always true, so it will fail on retries too
@@ -437,9 +457,13 @@ async fn test_step_idempotency_after_retry(pool: PgPool) -> sqlx::Result<()> {
 /// Test that a CPU-bound task that can't heartbeat gets reclaimed.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_cpu_bound_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "crash_cpu").await;
+    let client = create_client(pool.clone(), "crash_cpu")
+        .register::<CpuBoundTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<CpuBoundTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -501,9 +525,13 @@ async fn test_cpu_bound_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
 /// Uses real time delays since fake time only affects database, not worker's tokio timing.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_slow_task_outlives_lease(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "crash_slow").await;
+    let client = create_client(pool.clone(), "crash_slow")
+        .register::<SlowNoHeartbeatTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SlowNoHeartbeatTask>().await.unwrap();
 
     let claim_timeout = Duration::from_secs(2); // 2 second lease
 

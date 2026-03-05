@@ -10,17 +10,12 @@ use common::tasks::{
     LongRunningHeartbeatParams, LongRunningHeartbeatTask, SleepThenCheckpointParams,
     SleepThenCheckpointTask,
 };
-use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
+use durable::{Durable, DurableBuilder, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
 use sqlx::PgPool;
 use std::time::Duration;
 
-async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
-    Durable::builder()
-        .pool(pool)
-        .queue_name(queue_name)
-        .build()
-        .await
-        .expect("Failed to create Durable client")
+fn create_client(pool: PgPool, queue_name: &str) -> DurableBuilder {
+    Durable::builder().pool(pool).queue_name(queue_name)
 }
 
 // ============================================================================
@@ -30,9 +25,13 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 /// Test that claiming a task sets the correct expiry time.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_claim_sets_correct_expiry(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "lease_claim").await;
+    let client = create_client(pool.clone(), "lease_claim")
+        .register::<LongRunningHeartbeatTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -89,9 +88,13 @@ async fn test_claim_sets_correct_expiry(pool: PgPool) -> sqlx::Result<()> {
 /// Test that heartbeat extends the lease.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_heartbeat_extends_lease(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "lease_hb").await;
+    let client = create_client(pool.clone(), "lease_hb")
+        .register::<LongRunningHeartbeatTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -164,9 +167,13 @@ async fn test_heartbeat_extends_lease(pool: PgPool) -> sqlx::Result<()> {
 async fn test_checkpoint_extends_lease(pool: PgPool) -> sqlx::Result<()> {
     use common::tasks::{ManyStepsParams, ManyStepsTask};
 
-    let client = create_client(pool.clone(), "lease_ckpt").await;
+    let client = create_client(pool.clone(), "lease_ckpt")
+        .register::<ManyStepsTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<ManyStepsTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -235,9 +242,13 @@ async fn test_checkpoint_extends_lease(pool: PgPool) -> sqlx::Result<()> {
 /// Test that checkpoints are rejected once the lease has expired.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_checkpoint_rejected_after_lease_expired(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "lease_expired_ckpt").await;
+    let client = create_client(pool.clone(), "lease_expired_ckpt")
+        .register::<SleepThenCheckpointTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SleepThenCheckpointTask>().await.unwrap();
 
     let claim_timeout = Duration::from_secs(1);
 
@@ -317,9 +328,13 @@ async fn test_checkpoint_rejected_after_lease_expired(pool: PgPool) -> sqlx::Res
 async fn test_checkpoint_rejected_after_lease_expired_single_worker(
     pool: PgPool,
 ) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "lease_expired_single").await;
+    let client = create_client(pool.clone(), "lease_expired_single")
+        .register::<SleepThenCheckpointTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SleepThenCheckpointTask>().await.unwrap();
 
     let claim_timeout = Duration::from_secs(1);
 
@@ -386,9 +401,13 @@ async fn test_checkpoint_rejected_after_lease_expired_single_worker(
 /// Test that heartbeat detects if the task has been cancelled.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_heartbeat_detects_cancellation(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "lease_cancel").await;
+    let client = create_client(pool.clone(), "lease_cancel")
+        .register::<LongRunningHeartbeatTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
     // Spawn a long-running task
     let spawn_result = client
