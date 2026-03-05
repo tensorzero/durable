@@ -318,8 +318,7 @@ impl Worker {
         };
 
         // Look up handler
-        let registry = durable.registry().read().await;
-        let handler = match registry.get(task.task_name.as_str()) {
+        let handler = match durable.registry().get(task.task_name.as_str()) {
             Some(h) => h.clone(),
             None => {
                 tracing::error!("Unknown task: {}", task.task_name);
@@ -336,7 +335,6 @@ impl Worker {
                 return;
             }
         };
-        drop(registry);
 
         // Execute task with timeout enforcement
         // We instrument the actual task execution itself, to continue the trace context

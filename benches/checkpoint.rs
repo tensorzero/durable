@@ -30,8 +30,10 @@ fn bench_step_cache_miss(c: &mut Criterion) {
                         let mut total_time = Duration::ZERO;
 
                         for _ in 0..iters {
-                            let ctx = BenchContext::new().await;
-                            ctx.client.register::<MultiStepBenchTask>().await.unwrap();
+                            let ctx = BenchContext::with_builder(|b| {
+                                b.register::<MultiStepBenchTask>().unwrap()
+                            })
+                            .await;
 
                             ctx.client
                                 .spawn::<MultiStepBenchTask>(MultiStepParams { num_steps })
@@ -82,8 +84,9 @@ fn bench_step_cache_hit(c: &mut Criterion) {
                         let mut total_time = Duration::ZERO;
 
                         for _ in 0..iters {
-                            let ctx = BenchContext::new().await;
-                            ctx.client.register::<MultiStepBenchTask>().await.unwrap();
+                            let ctx = BenchContext::with_builder(|b| {
+                                b.register::<MultiStepBenchTask>().unwrap()
+                            }).await;
 
                             // First run to populate checkpoints
                             let spawn_result = ctx
@@ -170,11 +173,10 @@ fn bench_large_payload_checkpoint(c: &mut Criterion) {
                         let mut total_time = Duration::ZERO;
 
                         for _ in 0..iters {
-                            let ctx = BenchContext::new().await;
-                            ctx.client
-                                .register::<LargePayloadBenchTask>()
-                                .await
-                                .unwrap();
+                            let ctx = BenchContext::with_builder(|b| {
+                                b.register::<LargePayloadBenchTask>().unwrap()
+                            })
+                            .await;
 
                             ctx.client
                                 .spawn::<LargePayloadBenchTask>(LargePayloadParams { payload_size })

@@ -17,8 +17,7 @@ fn bench_spawn_latency(c: &mut Criterion) {
     group.bench_function("single_spawn", |b| {
         b.iter_custom(|iters| {
             rt.block_on(async {
-                let ctx = BenchContext::new().await;
-                ctx.client.register::<NoOpTask>().await.unwrap();
+                let ctx = BenchContext::with_builder(|b| b.register::<NoOpTask>().unwrap()).await;
 
                 let start = std::time::Instant::now();
                 for _ in 0..iters {
@@ -57,8 +56,9 @@ fn bench_task_throughput(c: &mut Criterion) {
                         let mut total_time = Duration::ZERO;
 
                         for _ in 0..iters {
-                            let ctx = BenchContext::new().await;
-                            ctx.client.register::<QuickTask>().await.unwrap();
+                            let ctx =
+                                BenchContext::with_builder(|b| b.register::<QuickTask>().unwrap())
+                                    .await;
 
                             // Spawn all tasks first
                             for i in 0..num_tasks {
@@ -113,8 +113,7 @@ fn bench_e2e_completion(c: &mut Criterion) {
     group.bench_function("single_task_roundtrip", |b| {
         b.iter_custom(|iters| {
             rt.block_on(async {
-                let ctx = BenchContext::new().await;
-                ctx.client.register::<NoOpTask>().await.unwrap();
+                let ctx = BenchContext::with_builder(|b| b.register::<NoOpTask>().unwrap()).await;
 
                 let worker = ctx
                     .client

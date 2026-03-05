@@ -8,19 +8,16 @@ use common::tasks::{
     SpawnByNameParams, SpawnByNameTask, SpawnFailingChildTask, SpawnSlowChildParams,
     SpawnSlowChildTask,
 };
-use durable::{CancellationPolicy, Durable, MIGRATOR, RetryStrategy, WorkerOptions};
+use durable::{
+    CancellationPolicy, Durable, DurableBuilder, MIGRATOR, RetryStrategy, WorkerOptions,
+};
 use serde_json::Value as JsonValue;
 use sqlx::{AssertSqlSafe, PgPool};
 use std::time::Duration;
 
-/// Helper to create a Durable client from the test pool.
-async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
-    Durable::builder()
-        .pool(pool)
-        .queue_name(queue_name)
-        .build()
-        .await
-        .expect("Failed to create Durable client")
+/// Helper to create a DurableBuilder from the test pool.
+fn create_client(pool: PgPool, queue_name: &str) -> DurableBuilder {
+    Durable::builder().pool(pool).queue_name(queue_name)
 }
 
 #[derive(sqlx::FromRow)]
@@ -91,10 +88,15 @@ async fn get_parent_task_id(
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_spawn_single_child_and_join(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "fanout_single").await;
+    let client = create_client(pool.clone(), "fanout_single")
+        .register::<SingleSpawnTask>()
+        .unwrap()
+        .register::<DoubleTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SingleSpawnTask>().await.unwrap();
-    client.register::<DoubleTask>().await.unwrap();
 
     // Spawn parent task
     let spawn_result = client
@@ -138,10 +140,15 @@ async fn test_spawn_single_child_and_join(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_spawn_multiple_children_and_join(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "fanout_multi").await;
+    let client = create_client(pool.clone(), "fanout_multi")
+        .register::<MultiSpawnTask>()
+        .unwrap()
+        .register::<DoubleTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<MultiSpawnTask>().await.unwrap();
-    client.register::<DoubleTask>().await.unwrap();
 
     // Spawn parent task with multiple values
     let spawn_result = client
@@ -192,10 +199,15 @@ async fn test_spawn_multiple_children_and_join(pool: PgPool) -> sqlx::Result<()>
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_child_has_parent_task_id(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "fanout_parent").await;
+    let client = create_client(pool.clone(), "fanout_parent")
+        .register::<SingleSpawnTask>()
+        .unwrap()
+        .register::<DoubleTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SingleSpawnTask>().await.unwrap();
-    client.register::<DoubleTask>().await.unwrap();
 
     // Spawn parent task
     let spawn_result = client
@@ -249,10 +261,15 @@ async fn test_child_has_parent_task_id(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_child_failure_propagates_to_parent(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "fanout_fail").await;
+    let client = create_client(pool.clone(), "fanout_fail")
+        .register::<SpawnFailingChildTask>()
+        .unwrap()
+        .register::<FailingChildTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SpawnFailingChildTask>().await.unwrap();
-    client.register::<FailingChildTask>().await.unwrap();
 
     // Spawn parent task that will spawn a failing child
     // Use max_attempts=1 for both parent and child to avoid long retry waits
@@ -292,10 +309,15 @@ async fn test_child_failure_propagates_to_parent(pool: PgPool) -> sqlx::Result<(
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_cascade_cancel_when_parent_cancelled(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "fanout_cancel").await;
+    let client = create_client(pool.clone(), "fanout_cancel")
+        .register::<SpawnSlowChildTask>()
+        .unwrap()
+        .register::<SlowChildTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SpawnSlowChildTask>().await.unwrap();
-    client.register::<SlowChildTask>().await.unwrap();
 
     // Spawn parent task that will spawn a slow child (5 seconds)
     let spawn_result = client
@@ -366,10 +388,15 @@ async fn test_cascade_cancel_when_parent_auto_cancelled_by_max_duration(
     // Use single-conn pool for fake_time
     let test_pool = single_conn_pool(&pool).await;
 
-    let client = create_client(test_pool.clone(), "fanout_auto_cancel").await;
+    let client = create_client(test_pool.clone(), "fanout_auto_cancel")
+        .register::<SpawnSlowChildTask>()
+        .unwrap()
+        .register::<SlowChildTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SpawnSlowChildTask>().await.unwrap();
-    client.register::<SlowChildTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&test_pool, start_time).await?;
@@ -511,13 +538,15 @@ async fn test_spawn_by_name_from_task_context(pool: PgPool) -> sqlx::Result<()> 
             max_pending_time: Some(Duration::from_secs(3600)),
             max_running_time: None,
         })
+        .register::<SpawnByNameTask>()
+        .unwrap()
+        .register::<DoubleTask>()
+        .unwrap()
         .build()
         .await
         .expect("Failed to create client");
 
     client.create_queue(None).await.unwrap();
-    client.register::<SpawnByNameTask>().await.unwrap();
-    client.register::<DoubleTask>().await.unwrap();
 
     // Spawn parent task that will use spawn_by_name internally
     let spawn_result = client
@@ -611,10 +640,15 @@ async fn test_join_cancelled_child_returns_child_cancelled_error(pool: PgPool) -
     use common::helpers::{get_failed_payload, wait_for_task_terminal};
     use common::tasks::{JoinCancelledChildParams, JoinCancelledChildTask, SlowChildTask};
 
-    let client = create_client(pool.clone(), "fanout_child_cancel").await;
+    let client = create_client(pool.clone(), "fanout_child_cancel")
+        .register::<JoinCancelledChildTask>()
+        .unwrap()
+        .register::<SlowChildTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<JoinCancelledChildTask>().await.unwrap();
-    client.register::<SlowChildTask>().await.unwrap();
 
     // Spawn parent task with max_attempts=1 to fail quickly
     let spawn_result = client
@@ -703,10 +737,15 @@ async fn test_join_cancelled_child_returns_child_cancelled_error(pool: PgPool) -
 async fn test_child_failed_error_contains_message(pool: PgPool) -> sqlx::Result<()> {
     use common::helpers::{get_failed_payload, wait_for_task_terminal};
 
-    let client = create_client(pool.clone(), "fanout_child_msg").await;
+    let client = create_client(pool.clone(), "fanout_child_msg")
+        .register::<SpawnFailingChildTask>()
+        .unwrap()
+        .register::<FailingChildTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SpawnFailingChildTask>().await.unwrap();
-    client.register::<FailingChildTask>().await.unwrap();
 
     // Spawn parent task with max_attempts=1
     let spawn_result = client
@@ -775,10 +814,15 @@ async fn test_join_timeout_when_parent_claim_expires(pool: PgPool) -> sqlx::Resu
     use common::helpers::{get_failed_payload, wait_for_task_terminal};
     use common::tasks::{SlowChildTask, SpawnSlowChildParams, SpawnSlowChildTask};
 
-    let client = create_client(pool.clone(), "fanout_join_timeout").await;
+    let client = create_client(pool.clone(), "fanout_join_timeout")
+        .register::<SpawnSlowChildTask>()
+        .unwrap()
+        .register::<SlowChildTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SpawnSlowChildTask>().await.unwrap();
-    client.register::<SlowChildTask>().await.unwrap();
 
     // Spawn parent with short claim_timeout that will expire while waiting for slow child
     // The parent doesn't heartbeat during join(), so its claim will expire

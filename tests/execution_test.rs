@@ -7,19 +7,14 @@ use common::tasks::{
     MultiStepOutput, MultiStepTask, MultipleCallsOutput, MultipleConvenienceCallsTask,
     ResearchParams, ResearchResult, ResearchTask, ReservedPrefixTask,
 };
-use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
+use durable::{Durable, DurableBuilder, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use std::borrow::Cow;
 use std::time::Duration;
 
-/// Helper to create a Durable client from the test pool.
-async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
-    Durable::builder()
-        .pool(pool)
-        .queue_name(queue_name)
-        .build()
-        .await
-        .expect("Failed to create Durable client")
+/// Helper to create a DurableBuilder from the test pool.
+fn create_client(pool: PgPool, queue_name: &str) -> DurableBuilder {
+    Durable::builder().pool(pool).queue_name(queue_name)
 }
 
 #[derive(sqlx::FromRow)]
@@ -68,9 +63,13 @@ async fn get_task_result(
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_simple_task_executes_and_completes(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_simple").await;
+    let client = create_client(pool.clone(), "exec_simple")
+        .register::<EchoTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await.unwrap();
 
     // Spawn a task
     let spawn_result = client
@@ -111,9 +110,13 @@ async fn test_simple_task_executes_and_completes(pool: PgPool) -> sqlx::Result<(
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_task_state_transitions(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_states").await;
+    let client = create_client(pool.clone(), "exec_states")
+        .register::<EchoTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await.unwrap();
 
     // Spawn a task
     let spawn_result = client
@@ -150,9 +153,13 @@ async fn test_task_state_transitions(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_empty_params_task_executes(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_empty").await;
+    let client = create_client(pool.clone(), "exec_empty")
+        .register::<EmptyParamsTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EmptyParamsTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<EmptyParamsTask>(())
@@ -188,9 +195,13 @@ async fn test_empty_params_task_executes(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_multi_step_task_completes_all_steps(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_steps").await;
+    let client = create_client(pool.clone(), "exec_steps")
+        .register::<MultiStepTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<MultiStepTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<MultiStepTask>(())
@@ -231,9 +242,13 @@ async fn test_multi_step_task_completes_all_steps(pool: PgPool) -> sqlx::Result<
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_multiple_tasks_execute_concurrently(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_concurrent").await;
+    let client = create_client(pool.clone(), "exec_concurrent")
+        .register::<EchoTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await.unwrap();
 
     // Spawn multiple tasks
     let mut task_ids = Vec::new();
@@ -273,9 +288,13 @@ async fn test_multiple_tasks_execute_concurrently(pool: PgPool) -> sqlx::Result<
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_worker_concurrency_limit_respected(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_limit").await;
+    let client = create_client(pool.clone(), "exec_limit")
+        .register::<EchoTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await.unwrap();
 
     // Spawn more tasks than concurrency limit
     for i in 0..10 {
@@ -316,9 +335,13 @@ async fn test_worker_concurrency_limit_respected(pool: PgPool) -> sqlx::Result<(
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_worker_graceful_shutdown_waits(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_shutdown").await;
+    let client = create_client(pool.clone(), "exec_shutdown")
+        .register::<EchoTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<EchoTask>(EchoParams {
@@ -353,7 +376,10 @@ async fn test_worker_graceful_shutdown_waits(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_unregistered_task_fails(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_unreg").await;
+    let client = create_client(pool.clone(), "exec_unreg")
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
     // Note: We don't register any task handler
 
@@ -386,9 +412,13 @@ async fn test_unregistered_task_fails(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_task_result_stored_correctly(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_result").await;
+    let client = create_client(pool.clone(), "exec_result")
+        .register::<EchoTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await.unwrap();
 
     let test_message = "This is a test message with special chars: <>&\"'";
 
@@ -425,9 +455,13 @@ async fn test_task_result_stored_correctly(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_research_task_readme_example(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_research").await;
+    let client = create_client(pool.clone(), "exec_research")
+        .register::<ResearchTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<ResearchTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<ResearchTask>(ResearchParams {
@@ -476,9 +510,13 @@ async fn test_research_task_readme_example(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_convenience_methods_execute(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_convenience").await;
+    let client = create_client(pool.clone(), "exec_convenience")
+        .register::<ConvenienceMethodsTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<ConvenienceMethodsTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<ConvenienceMethodsTask>(())
@@ -525,12 +563,13 @@ async fn test_convenience_methods_execute(pool: PgPool) -> sqlx::Result<()> {
 async fn test_multiple_convenience_calls_produce_different_values(
     pool: PgPool,
 ) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_multi_convenience").await;
-    client.create_queue(None).await.unwrap();
-    client
+    let client = create_client(pool.clone(), "exec_multi_convenience")
         .register::<MultipleConvenienceCallsTask>()
+        .unwrap()
+        .build()
         .await
         .unwrap();
+    client.create_queue(None).await.unwrap();
 
     let spawn_result = client
         .spawn::<MultipleConvenienceCallsTask>(())
@@ -572,9 +611,13 @@ async fn test_multiple_convenience_calls_produce_different_values(
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_reserved_prefix_rejected(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "exec_reserved").await;
+    let client = create_client(pool.clone(), "exec_reserved")
+        .register::<ReservedPrefixTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<ReservedPrefixTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<ReservedPrefixTask>(())
@@ -605,9 +648,13 @@ async fn test_reserved_prefix_rejected(pool: PgPool) -> sqlx::Result<()> {
 async fn test_reserved_prefix_error_payload(pool: PgPool) -> sqlx::Result<()> {
     use common::helpers::get_failed_payload;
 
-    let client = create_client(pool.clone(), "exec_reserved_payload").await;
+    let client = create_client(pool.clone(), "exec_reserved_payload")
+        .register::<ReservedPrefixTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<ReservedPrefixTask>().await.unwrap();
 
     let spawn_result = client
         .spawn_with_options::<ReservedPrefixTask>((), {
@@ -667,9 +714,13 @@ async fn test_reserved_prefix_error_payload(pool: PgPool) -> sqlx::Result<()> {
 async fn test_long_running_task_with_heartbeat_completes(pool: PgPool) -> sqlx::Result<()> {
     use common::tasks::{LongRunningHeartbeatParams, LongRunningHeartbeatTask};
 
-    let client = create_client(pool.clone(), "exec_heartbeat_timer").await;
+    let client = create_client(pool.clone(), "exec_heartbeat_timer")
+        .register::<LongRunningHeartbeatTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<LongRunningHeartbeatTask>().await.unwrap();
 
     // Run a task for 3 seconds with 1 second claim_timeout
     // Task heartbeats every 200ms, so it should stay alive
@@ -762,19 +813,6 @@ impl durable::Task<AppState> for WriteToDbTask {
     }
 }
 
-/// Helper to create a Durable client with application state.
-async fn create_client_with_state(pool: PgPool, queue_name: &str) -> durable::Durable<AppState> {
-    let app_state = AppState {
-        db_pool: pool.clone(),
-    };
-    durable::Durable::builder()
-        .pool(pool)
-        .queue_name(queue_name)
-        .build_with_state(app_state)
-        .await
-        .expect("Failed to create Durable client with state")
-}
-
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_task_uses_application_state(pool: PgPool) -> sqlx::Result<()> {
     // Create a test table for the task to write to
@@ -788,10 +826,19 @@ async fn test_task_uses_application_state(pool: PgPool) -> sqlx::Result<()> {
     .execute(&pool)
     .await?;
 
-    // Create client with application state
-    let client = create_client_with_state(pool.clone(), "exec_state").await;
+    let app_state = AppState {
+        db_pool: pool.clone(),
+    };
+    let client = durable::Durable::builder()
+        .pool(pool.clone())
+        .queue_name("exec_state")
+        .register::<WriteToDbTask>()
+        .unwrap()
+        .build_with_state(app_state)
+        .await
+        .expect("Failed to create Durable client with state");
+
     client.create_queue(None).await.unwrap();
-    client.register::<WriteToDbTask>().await.unwrap();
 
     // Spawn a task that will use the state to write to the database
     let spawn_result = client

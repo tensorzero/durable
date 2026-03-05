@@ -8,17 +8,12 @@ use common::tasks::{
     LargePayloadParams, LargePayloadTask, ManyStepsParams, ManyStepsTask,
     reset_deterministic_task_state,
 };
-use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
+use durable::{Durable, DurableBuilder, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use std::time::Duration;
 
-async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
-    Durable::builder()
-        .pool(pool)
-        .queue_name(queue_name)
-        .build()
-        .await
-        .expect("Failed to create Durable client")
+fn create_client(pool: PgPool, queue_name: &str) -> DurableBuilder {
+    Durable::builder().pool(pool).queue_name(queue_name)
 }
 
 // ============================================================================
@@ -31,9 +26,13 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 async fn test_checkpoint_prevents_step_reexecution(pool: PgPool) -> sqlx::Result<()> {
     use common::tasks::{StepCountingParams, StepCountingTask};
 
-    let client = create_client(pool.clone(), "ckpt_replay").await;
+    let client = create_client(pool.clone(), "ckpt_replay")
+        .register::<StepCountingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<StepCountingTask>().await.unwrap();
 
     // First, spawn a task that will fail after step2
     let spawn_result = client
@@ -85,9 +84,13 @@ async fn test_checkpoint_prevents_step_reexecution(pool: PgPool) -> sqlx::Result
     );
 
     // Now test a successful task with multiple steps to verify checkpoints work
-    let client2 = create_client(pool.clone(), "ckpt_replay2").await;
+    let client2 = create_client(pool.clone(), "ckpt_replay2")
+        .register::<StepCountingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client2.create_queue(None).await.unwrap();
-    client2.register::<StepCountingTask>().await.unwrap();
 
     let spawn_result2 = client2
         .spawn::<StepCountingTask>(StepCountingParams {
@@ -130,9 +133,13 @@ async fn test_checkpoint_prevents_step_reexecution(pool: PgPool) -> sqlx::Result
 /// Test that ctx.rand() returns the same value after retry.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_deterministic_rand_preserved_on_retry(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "ckpt_rand").await;
+    let client = create_client(pool.clone(), "ckpt_rand")
+        .register::<DeterministicReplayTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<DeterministicReplayTask>().await.unwrap();
 
     reset_deterministic_task_state();
 
@@ -196,9 +203,13 @@ async fn test_deterministic_rand_preserved_on_retry(pool: PgPool) -> sqlx::Resul
 /// Test that ctx.now() returns the same timestamp after retry.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_deterministic_now_preserved_on_retry(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "ckpt_now").await;
+    let client = create_client(pool.clone(), "ckpt_now")
+        .register::<DeterministicReplayTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<DeterministicReplayTask>().await.unwrap();
 
     reset_deterministic_task_state();
 
@@ -258,9 +269,13 @@ async fn test_deterministic_now_preserved_on_retry(pool: PgPool) -> sqlx::Result
 /// Test that ctx.uuid7() returns the same UUID after retry.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_deterministic_uuid7_preserved_on_retry(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "ckpt_uuid").await;
+    let client = create_client(pool.clone(), "ckpt_uuid")
+        .register::<DeterministicReplayTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<DeterministicReplayTask>().await.unwrap();
 
     reset_deterministic_task_state();
 
@@ -320,9 +335,13 @@ async fn test_deterministic_uuid7_preserved_on_retry(pool: PgPool) -> sqlx::Resu
 /// Test that a task with 50+ steps completes correctly.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_long_workflow_many_steps(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "ckpt_long").await;
+    let client = create_client(pool.clone(), "ckpt_long")
+        .register::<ManyStepsTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<ManyStepsTask>().await.unwrap();
 
     let num_steps = 50;
 
@@ -373,9 +392,13 @@ async fn test_long_workflow_many_steps(pool: PgPool) -> sqlx::Result<()> {
 /// Test that a step returning a large payload (1MB+) persists correctly.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_large_payload_checkpoint(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "ckpt_large").await;
+    let client = create_client(pool.clone(), "ckpt_large")
+        .register::<LargePayloadTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<LargePayloadTask>().await.unwrap();
 
     let size_bytes = 1_000_000; // 1MB
 

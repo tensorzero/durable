@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::error::{DurableError, DurableResult};
@@ -69,12 +68,13 @@ pub(crate) fn validate_headers(headers: &Option<HashMap<String, JsonValue>>) -> 
 /// The main client for interacting with durable workflows.
 ///
 /// Use this client to:
-/// - Register task types with [`register`](Self::register)
 /// - Spawn tasks with [`spawn`](Self::spawn) or [`spawn_with_options`](Self::spawn_with_options)
 /// - Start workers with [`start_worker`](Self::start_worker)
 /// - Manage queues with [`create_queue`](Self::create_queue), [`drop_queue`](Self::drop_queue)
 /// - Emit events with [`emit_event`](Self::emit_event)
 /// - Cancel tasks with [`cancel_task`](Self::cancel_task)
+///
+/// Tasks are registered at build time via [`DurableBuilder::register`].
 ///
 /// # Type Parameter
 ///
@@ -88,6 +88,7 @@ pub(crate) fn validate_headers(headers: &Option<HashMap<String, JsonValue>>) -> 
 /// let client = Durable::builder()
 ///     .database_url("postgres://localhost/myapp")
 ///     .queue_name("tasks")
+///     .register::<MyTask>()?
 ///     .build()
 ///     .await?;
 ///
@@ -104,7 +105,6 @@ pub(crate) fn validate_headers(headers: &Option<HashMap<String, JsonValue>>) -> 
 ///     .build_with_state(app_state)
 ///     .await?;
 ///
-/// client.register::<MyTask>().await?;
 /// client.spawn::<MyTask>(params).await?;
 /// ```
 pub struct Durable<State = ()>
@@ -115,7 +115,7 @@ where
     owns_pool: AtomicBool,
     queue_name: String,
     spawn_defaults: SpawnDefaults,
-    registry: Arc<RwLock<TaskRegistry<State>>>,
+    registry: Arc<TaskRegistry<State>>,
     state: State,
 }
 
@@ -143,12 +143,15 @@ impl<State: Clone + Send + Sync> Durable<State> {
         }
     }
 
-    pub(crate) fn registry(&self) -> &Arc<RwLock<TaskRegistry<State>>> {
+    pub(crate) fn registry(&self) -> &Arc<TaskRegistry<State>> {
         &self.registry
     }
 }
 
 /// Builder for configuring a [`Durable`] client.
+///
+/// Tasks are registered at build time via [`register`](Self::register) or
+/// [`register_instance`](Self::register_instance).
 ///
 /// # Example
 ///
@@ -161,15 +164,7 @@ impl<State: Clone + Send + Sync> Durable<State> {
 ///     .database_url("postgres://localhost/myapp")
 ///     .queue_name("orders")
 ///     .default_max_attempts(3)
-///     .default_retry_strategy(RetryStrategy::Exponential {
-///         base_delay: Duration::from_secs(5),
-///         factor: 2.0,
-///         max_backoff: Duration::from_secs(300),
-///     })
-///     .default_cancellation(CancellationPolicy {
-///         max_pending_time: Some(Duration::from_secs(3600)),
-///         max_running_time: None,
-///     })
+///     .register::<MyTask>()?
 ///     .build()
 ///     .await?;
 ///
@@ -179,14 +174,15 @@ impl<State: Clone + Send + Sync> Durable<State> {
 ///     .build_with_state(my_app_state)
 ///     .await?;
 /// ```
-pub struct DurableBuilder {
+pub struct DurableBuilder<State: Clone + Send + Sync + 'static = ()> {
     database_url: Option<String>,
     pool: Option<PgPool>,
     queue_name: String,
     spawn_defaults: SpawnDefaults,
+    registry: TaskRegistry<State>,
 }
 
-impl DurableBuilder {
+impl<State: Clone + Send + Sync + 'static> DurableBuilder<State> {
     pub fn new() -> Self {
         Self {
             database_url: None,
@@ -197,9 +193,12 @@ impl DurableBuilder {
                 retry_strategy: None,
                 cancellation: None,
             },
+            registry: HashMap::new(),
         }
     }
+}
 
+impl<State: Clone + Send + Sync + 'static> DurableBuilder<State> {
     /// Set database URL (will create a new connection pool)
     pub fn database_url(mut self, url: impl Into<String>) -> Self {
         self.database_url = Some(url.into());
@@ -236,43 +235,43 @@ impl DurableBuilder {
         self
     }
 
-    /// Build the Durable client without application state.
+    /// Register a task type. Required before spawning or processing.
     ///
-    /// Use this when your tasks don't need access to shared resources
-    /// like HTTP clients or database pools.
-    pub async fn build(self) -> DurableResult<Durable<()>> {
-        self.build_with_state(()).await
+    /// Returns an error if a task with the same name is already registered.
+    pub fn register<T: Task<State> + Default>(self) -> DurableResult<Self> {
+        self.register_instance(T::default())
+    }
+
+    /// Register a task instance. Required before spawning or processing.
+    ///
+    /// Use this when you need to register a task with runtime-determined metadata
+    /// (e.g., a TypeScript tool loaded from a config file).
+    ///
+    /// Returns an error if a task with the same name is already registered.
+    pub fn register_instance<T: Task<State>>(mut self, task: T) -> DurableResult<Self> {
+        let name = task.name();
+        if self.registry.contains_key(name.as_ref()) {
+            return Err(DurableError::TaskAlreadyRegistered {
+                task_name: name.to_string(),
+            });
+        }
+        self.registry.insert(name, Arc::new(TaskWrapper::new(task)));
+        Ok(self)
     }
 
     /// Build the Durable client with application state.
     ///
     /// The state will be cloned and passed to each task execution.
-    /// Use this to provide shared resources like HTTP clients, database pools,
-    /// or other application state to your tasks.
     ///
     /// # Example
     ///
     /// ```ignore
-    /// #[derive(Clone)]
-    /// struct AppState {
-    ///     http_client: reqwest::Client,
-    ///     db_pool: PgPool,
-    /// }
-    ///
-    /// let state = AppState {
-    ///     http_client: reqwest::Client::new(),
-    ///     db_pool: pool.clone(),
-    /// };
-    ///
     /// let client = Durable::builder()
     ///     .database_url("postgres://localhost/myapp")
-    ///     .build_with_state(state)
+    ///     .build_with_state(app_state)
     ///     .await?;
     /// ```
-    pub async fn build_with_state<State>(self, state: State) -> DurableResult<Durable<State>>
-    where
-        State: Clone + Send + Sync + 'static,
-    {
+    pub async fn build_with_state(self, state: State) -> DurableResult<Durable<State>> {
         let (pool, owns_pool) = if let Some(pool) = self.pool {
             (pool, false)
         } else {
@@ -288,15 +287,25 @@ impl DurableBuilder {
             owns_pool: AtomicBool::new(owns_pool),
             queue_name: self.queue_name,
             spawn_defaults: self.spawn_defaults,
-            registry: Arc::new(RwLock::new(HashMap::new())),
+            registry: Arc::new(self.registry),
             state,
         })
     }
 }
 
-impl Default for DurableBuilder {
+impl Default for DurableBuilder<()> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl DurableBuilder<()> {
+    /// Build the Durable client without application state.
+    ///
+    /// Use this when your tasks don't need access to shared resources
+    /// like HTTP clients or database pools.
+    pub async fn build(self) -> DurableResult<Durable<()>> {
+        self.build_with_state(()).await
     }
 }
 
@@ -308,17 +317,17 @@ impl Durable<()> {
             .build()
             .await
     }
-
-    /// Access the builder for custom configuration
-    pub fn builder() -> DurableBuilder {
-        DurableBuilder::new()
-    }
 }
 
 impl<State> Durable<State>
 where
     State: Clone + Send + Sync + 'static,
 {
+    /// Access the builder for custom configuration
+    pub fn builder() -> DurableBuilder<State> {
+        DurableBuilder::new()
+    }
+
     /// Get a reference to the underlying connection pool
     pub fn pool(&self) -> &PgPool {
         &self.pool
@@ -336,31 +345,6 @@ where
 
     pub(crate) fn spawn_defaults(&self) -> &SpawnDefaults {
         &self.spawn_defaults
-    }
-
-    /// Register a task type. Required before spawning or processing.
-    ///
-    /// Returns an error if a task with the same name is already registered.
-    pub async fn register<T: Task<State> + Default>(&self) -> DurableResult<&Self> {
-        self.register_instance(T::default()).await
-    }
-
-    /// Register a task instance. Required before spawning or processing.
-    ///
-    /// Use this when you need to register a task with runtime-determined metadata
-    /// (e.g., a TypeScript tool loaded from a config file).
-    ///
-    /// Returns an error if a task with the same name is already registered.
-    pub async fn register_instance<T: Task<State>>(&self, task: T) -> DurableResult<&Self> {
-        let mut registry = self.registry.write().await;
-        let name = task.name();
-        if registry.contains_key(name.as_ref()) {
-            return Err(DurableError::TaskAlreadyRegistered {
-                task_name: name.to_string(),
-            });
-        }
-        registry.insert(name, Arc::new(TaskWrapper::new(task)));
-        Ok(self)
     }
 
     /// Spawn a task (type-safe version)
@@ -471,8 +455,7 @@ where
     {
         // Validate that the task is registered
         {
-            let registry = self.registry.read().await;
-            let Some(task) = registry.get(task_name) else {
+            let Some(task) = self.registry.get(task_name) else {
                 return Err(DurableError::TaskNotRegistered {
                     task_name: task_name.to_string(),
                 });

@@ -4,20 +4,15 @@ mod common;
 
 use common::helpers::wait_for_task_terminal;
 use common::tasks::{EchoParams, EchoTask};
-use durable::{Durable, MIGRATOR, WorkerOptions};
+use durable::{Durable, DurableBuilder, MIGRATOR, WorkerOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Barrier;
 
-async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
-    Durable::builder()
-        .pool(pool)
-        .queue_name(queue_name)
-        .build()
-        .await
-        .expect("Failed to create Durable client")
+fn create_client(pool: PgPool, queue_name: &str) -> DurableBuilder {
+    Durable::builder().pool(pool).queue_name(queue_name)
 }
 
 // ============================================================================
@@ -27,9 +22,13 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 /// Test that a task is claimed by exactly one worker when multiple workers compete.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_task_claimed_by_exactly_one_worker(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "conc_claim").await;
+    let client = create_client(pool.clone(), "conc_claim")
+        .register::<EchoTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await.unwrap();
 
     // Spawn a single task
     let spawn_result = client
@@ -49,8 +48,12 @@ async fn test_task_claimed_by_exactly_one_worker(pool: PgPool) -> sqlx::Result<(
         let barrier_clone = barrier.clone();
 
         let worker_handle = tokio::spawn(async move {
-            let client = create_client(pool_clone, "conc_claim").await;
-            client.register::<EchoTask>().await.unwrap();
+            let client = create_client(pool_clone, "conc_claim")
+                .register::<EchoTask>()
+                .unwrap()
+                .build()
+                .await
+                .unwrap();
 
             // Synchronize all workers to start at the same time
             barrier_clone.wait().await;
@@ -121,9 +124,13 @@ async fn test_task_claimed_by_exactly_one_worker(pool: PgPool) -> sqlx::Result<(
 /// Test that concurrent claims with SKIP LOCKED do not cause deadlocks.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_concurrent_claims_with_skip_locked(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "conc_skip").await;
+    let client = create_client(pool.clone(), "conc_skip")
+        .register::<EchoTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await.unwrap();
 
     // Spawn many tasks
     let num_tasks = 50;
@@ -149,8 +156,12 @@ async fn test_concurrent_claims_with_skip_locked(pool: PgPool) -> sqlx::Result<(
         let barrier_clone = barrier.clone();
 
         let handle = tokio::spawn(async move {
-            let client = create_client(pool_clone, "conc_skip").await;
-            client.register::<EchoTask>().await.unwrap();
+            let client = create_client(pool_clone, "conc_skip")
+                .register::<EchoTask>()
+                .unwrap()
+                .build()
+                .await
+                .unwrap();
 
             // Synchronize all workers to start at the same time
             barrier_clone.wait().await;
