@@ -15,12 +15,13 @@ async fn test_poll_completed_task(pool: PgPool) {
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_poll_completed")
+        .register::<EchoTask>()
+        .unwrap()
         .build()
         .await
         .unwrap();
 
     durable.create_queue(None).await.unwrap();
-    durable.register::<EchoTask>().await.unwrap();
 
     let spawned = durable
         .spawn::<EchoTask>(EchoParams {
@@ -88,12 +89,13 @@ async fn test_poll_failed_task(pool: PgPool) {
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_poll_failed")
+        .register::<FailingTask>()
+        .unwrap()
         .build()
         .await
         .unwrap();
 
     durable.create_queue(None).await.unwrap();
-    durable.register::<FailingTask>().await.unwrap();
 
     // Spawn with max_attempts=1 and no retry so it fails immediately
     let spawned = durable
@@ -151,12 +153,13 @@ async fn test_poll_cancelled_task(pool: PgPool) {
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_poll_cancelled")
+        .register::<EchoTask>()
+        .unwrap()
         .build()
         .await
         .unwrap();
 
     durable.create_queue(None).await.unwrap();
-    durable.register::<EchoTask>().await.unwrap();
 
     let spawned = durable
         .spawn::<EchoTask>(EchoParams {
@@ -183,12 +186,13 @@ async fn test_poll_failed_task_user_error(pool: PgPool) {
     let durable = Durable::builder()
         .pool(pool.clone())
         .queue_name("test_poll_user_error")
+        .register::<UserErrorTask>()
+        .unwrap()
         .build()
         .await
         .unwrap();
 
     durable.create_queue(None).await.unwrap();
-    durable.register::<UserErrorTask>().await.unwrap();
 
     // UserErrorTask returns a non-retryable User error, so max_attempts doesn't matter
     // but set to 1 to be explicit

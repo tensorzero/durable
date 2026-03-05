@@ -4,17 +4,12 @@ mod common;
 
 use common::helpers::{advance_time, count_runs_for_task, set_fake_time, wait_for_task_terminal};
 use common::tasks::{FailingParams, FailingTask, UserErrorParams, UserErrorTask};
-use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
+use durable::{Durable, DurableBuilder, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use std::time::Duration;
 
-async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
-    Durable::builder()
-        .pool(pool)
-        .queue_name(queue_name)
-        .build()
-        .await
-        .expect("Failed to create Durable client")
+fn create_client(pool: PgPool, queue_name: &str) -> DurableBuilder {
+    Durable::builder().pool(pool).queue_name(queue_name)
 }
 
 // ============================================================================
@@ -24,9 +19,13 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 /// Test that RetryStrategy::None creates no retry run.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_retry_strategy_none_no_retry(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "retry_none").await;
+    let client = create_client(pool.clone(), "retry_none")
+        .register::<FailingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<FailingTask>().await.unwrap();
 
     // Spawn task with no retry strategy
     let spawn_result = client
@@ -74,9 +73,13 @@ async fn test_retry_strategy_none_no_retry(pool: PgPool) -> sqlx::Result<()> {
 /// Test that RetryStrategy::Fixed creates retry at T + base_seconds.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_retry_strategy_fixed_delay(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "retry_fixed").await;
+    let client = create_client(pool.clone(), "retry_fixed")
+        .register::<FailingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<FailingTask>().await.unwrap();
 
     // Set fake time for deterministic testing
     let start_time = chrono::Utc::now();
@@ -154,9 +157,13 @@ async fn test_retry_strategy_fixed_delay(pool: PgPool) -> sqlx::Result<()> {
 /// Test that RetryStrategy::Exponential increases delays correctly.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_retry_strategy_exponential_backoff(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "retry_exp").await;
+    let client = create_client(pool.clone(), "retry_exp")
+        .register::<FailingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<FailingTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -239,9 +246,13 @@ async fn test_retry_strategy_exponential_backoff(pool: PgPool) -> sqlx::Result<(
 /// Test that max_attempts is honored and task fails permanently after N attempts.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_max_attempts_honored(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "retry_max").await;
+    let client = create_client(pool.clone(), "retry_max")
+        .register::<FailingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<FailingTask>().await.unwrap();
 
     let start_time = chrono::Utc::now();
     set_fake_time(&pool, start_time).await?;
@@ -305,9 +316,13 @@ async fn test_max_attempts_honored(pool: PgPool) -> sqlx::Result<()> {
 /// Test that a UserError (non-retryable error) does not get retried even with retry strategy.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_user_error_not_retried(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "user_error_no_retry").await;
+    let client = create_client(pool.clone(), "user_error_no_retry")
+        .register::<UserErrorTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<UserErrorTask>().await.unwrap();
 
     // Spawn task WITH retry strategy configured - but UserError should still not retry
     let spawn_result = client

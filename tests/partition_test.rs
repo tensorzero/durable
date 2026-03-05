@@ -4,17 +4,12 @@ mod common;
 
 use common::helpers::{count_runs_for_task, get_checkpoint_count, wait_for_task_terminal};
 use common::tasks::{StepCountingParams, StepCountingTask};
-use durable::{Durable, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
+use durable::{Durable, DurableBuilder, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
 use sqlx::PgPool;
 use std::time::Duration;
 
-async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
-    Durable::builder()
-        .pool(pool)
-        .queue_name(queue_name)
-        .build()
-        .await
-        .expect("Failed to create Durable client")
+fn create_client(pool: PgPool, queue_name: &str) -> DurableBuilder {
+    Durable::builder().pool(pool).queue_name(queue_name)
 }
 
 // ============================================================================
@@ -25,9 +20,13 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 /// Simulates "connection lost during checkpoint" by using a task that fails after step 2.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_db_connection_lost_during_checkpoint(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "part_ckpt").await;
+    let client = create_client(pool.clone(), "part_ckpt")
+        .register::<StepCountingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<StepCountingTask>().await.unwrap();
 
     // Spawn a task that will fail after step 2 (simulating checkpoint failure)
     let spawn_result = client
@@ -89,9 +88,13 @@ async fn test_db_connection_lost_during_checkpoint(pool: PgPool) -> sqlx::Result
 async fn test_stale_worker_checkpoint_rejected(pool: PgPool) -> sqlx::Result<()> {
     use common::tasks::{SlowNoHeartbeatParams, SlowNoHeartbeatTask};
 
-    let client = create_client(pool.clone(), "part_stale").await;
+    let client = create_client(pool.clone(), "part_stale")
+        .register::<SlowNoHeartbeatTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<SlowNoHeartbeatTask>().await.unwrap();
 
     let claim_timeout = Duration::from_secs(2); // Short lease
 
