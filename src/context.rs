@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::Durable;
 use crate::error::{ControlFlow, TaskError, TaskResult};
+use crate::heartbeat::{HeartbeatHandle, Heartbeater};
 use crate::task::Task;
 use crate::types::DurableEventPayload;
 use crate::types::{
@@ -63,6 +64,9 @@ where
 
     /// Notifies the worker when the lease is extended via step() or heartbeat().
     lease_extender: LeaseExtender,
+
+    /// Cloneable heartbeat handle for use in step closures.
+    heartbeat_handle: HeartbeatHandle,
 }
 
 /// Validate that a user-provided step name doesn't use reserved prefix.
@@ -103,6 +107,14 @@ where
             cache.insert(row.checkpoint_name, row.state);
         }
 
+        let heartbeat_handle = HeartbeatHandle::new(
+            durable.pool().clone(),
+            durable.queue_name().to_string(),
+            task.run_id,
+            claim_timeout,
+            lease_extender.clone(),
+        );
+
         Ok(Self {
             task_id: task.task_id,
             run_id: task.run_id,
@@ -113,6 +125,7 @@ where
             checkpoint_cache: cache,
             step_counters: HashMap::new(),
             lease_extender,
+            heartbeat_handle,
         })
     }
 
@@ -461,6 +474,14 @@ where
             })
     }
 
+    /// Get a cloneable heartbeat handle for use in step closures or `SimpleTool`s.
+    ///
+    /// The returned [`HeartbeatHandle`] can be passed into contexts that need to
+    /// extend the task lease without access to the full `TaskContext`.
+    pub fn heartbeat_handle(&self) -> HeartbeatHandle {
+        self.heartbeat_handle.clone()
+    }
+
     /// Extend the task's lease to prevent timeout.
     ///
     /// Use this for long-running operations that don't naturally checkpoint.
@@ -482,27 +503,7 @@ where
         )
     )]
     pub async fn heartbeat(&self, duration: Option<std::time::Duration>) -> TaskResult<()> {
-        let extend_by = duration.unwrap_or(self.claim_timeout);
-
-        if extend_by < std::time::Duration::from_secs(1) {
-            return Err(TaskError::Validation {
-                message: "heartbeat duration must be at least 1 second".to_string(),
-            });
-        }
-
-        let query = "SELECT durable.extend_claim($1, $2, $3)";
-        sqlx::query(query)
-            .bind(self.durable.queue_name())
-            .bind(self.run_id)
-            .bind(extend_by.as_secs() as i32)
-            .execute(self.durable.pool())
-            .await
-            .map_err(TaskError::from_sqlx_error)?;
-
-        // Notify worker that lease was extended so it can reset timers
-        self.lease_extender.notify(extend_by);
-
-        Ok(())
+        self.heartbeat_handle.heartbeat(duration).await
     }
 
     /// Generate a durable random value in [0, 1).
