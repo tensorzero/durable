@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -98,7 +99,7 @@ impl Heartbeater for NoopHeartbeater {
 }
 
 /// State provided to `step()` closures, wrapping the user's application state
-/// alongside a [`HeartbeatHandle`] for extending the task lease.
+/// alongside a heartbeater for extending the task lease.
 ///
 /// This is passed as the second argument to every `step()` closure, making
 /// heartbeating available without the consumer needing to thread it manually.
@@ -115,9 +116,18 @@ impl Heartbeater for NoopHeartbeater {
 ///     Ok(result)
 /// }).await?;
 /// ```
+///
+/// For testing step closures in isolation, construct with [`NoopHeartbeater`]:
+///
+/// ```ignore
+/// let step_state = StepState {
+///     state: my_test_state,
+///     heartbeater: Arc::new(NoopHeartbeater),
+/// };
+/// ```
 pub struct StepState<State> {
     /// The user's application state.
     pub state: State,
     /// Handle for extending the task lease during long-running operations.
-    pub heartbeater: HeartbeatHandle,
+    pub heartbeater: Arc<dyn Heartbeater>,
 }

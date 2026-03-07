@@ -7,6 +7,8 @@ use uuid::Uuid;
 
 use crate::Durable;
 use crate::error::{ControlFlow, TaskError, TaskResult};
+use std::sync::Arc;
+
 use crate::heartbeat::{HeartbeatHandle, Heartbeater, StepState};
 use crate::task::Task;
 use crate::types::DurableEventPayload;
@@ -208,7 +210,7 @@ where
         // Execute the step
         let step_state = StepState {
             state: self.durable.state().clone(),
-            heartbeater: self.heartbeat_handle.clone(),
+            heartbeater: Arc::new(self.heartbeat_handle.clone()),
         };
         let result = f(params, step_state).await.map_err(|e| TaskError::Step {
             base_name: base_name.to_string(),
