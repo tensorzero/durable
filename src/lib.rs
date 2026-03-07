@@ -110,7 +110,7 @@ pub use client::{Durable, DurableBuilder};
 pub use context::TaskContext;
 pub use cron::{ScheduleFilter, ScheduleInfo, ScheduleOptions, setup_pgcron};
 pub use error::{ControlFlow, DurableError, DurableResult, TaskError, TaskResult};
-pub use heartbeat::{HeartbeatHandle, Heartbeater, NoopHeartbeater};
+pub use heartbeat::{HeartbeatHandle, Heartbeater, NoopHeartbeater, StepState};
 pub use task::{ErasedTask, Task, TaskWrapper};
 pub use types::{
     CancellationPolicy, ClaimedTask, DurableEventPayload, RetryStrategy, SpawnDefaults,

@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::Durable;
 use crate::error::{ControlFlow, TaskError, TaskResult};
-use crate::heartbeat::{HeartbeatHandle, Heartbeater};
+use crate::heartbeat::{HeartbeatHandle, Heartbeater, StepState};
 use crate::task::Task;
 use crate::types::DurableEventPayload;
 use crate::types::{
@@ -165,9 +165,9 @@ where
     /// # Example
     ///
     /// ```ignore
-    /// let payment_id = ctx.step("charge-payment", ctx.task_id, |task_id, _state| async {
+    /// let payment_id = ctx.step("charge-payment", ctx.task_id, |task_id, step_state| async {
     ///     let idempotency_key = format!("{}:charge", task_id);
-    ///     stripe::charge(amount, &idempotency_key).await
+    ///     stripe::charge(amount, &idempotency_key, &step_state.state).await
     /// }).await?;
     /// ```
     #[cfg_attr(
@@ -182,7 +182,7 @@ where
         &mut self,
         base_name: &str,
         params: P,
-        f: fn(P, State) -> Fut,
+        f: fn(P, StepState<State>) -> Fut,
     ) -> TaskResult<T>
     where
         P: Serialize,
@@ -206,13 +206,14 @@ where
         span.record("cached", false);
 
         // Execute the step
-        let result =
-            f(params, self.durable.state().clone())
-                .await
-                .map_err(|e| TaskError::Step {
-                    base_name: base_name.to_string(),
-                    error: e,
-                })?;
+        let step_state = StepState {
+            state: self.durable.state().clone(),
+            heartbeater: self.heartbeat_handle.clone(),
+        };
+        let result = f(params, step_state).await.map_err(|e| TaskError::Step {
+            base_name: base_name.to_string(),
+            error: e,
+        })?;
 
         // Persist checkpoint (also extends claim lease)
         #[cfg(feature = "telemetry")]

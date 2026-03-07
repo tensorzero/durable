@@ -96,3 +96,28 @@ impl Heartbeater for NoopHeartbeater {
         Ok(())
     }
 }
+
+/// State provided to `step()` closures, wrapping the user's application state
+/// alongside a [`HeartbeatHandle`] for extending the task lease.
+///
+/// This is passed as the second argument to every `step()` closure, making
+/// heartbeating available without the consumer needing to thread it manually.
+///
+/// # Example
+///
+/// ```ignore
+/// ctx.step("long-operation", params, |params, step_state| async move {
+///     for item in &params.items {
+///         process(item, &step_state.state).await?;
+///         // Extend lease during long-running work
+///         let _ = step_state.heartbeater.heartbeat(None).await;
+///     }
+///     Ok(result)
+/// }).await?;
+/// ```
+pub struct StepState<State> {
+    /// The user's application state.
+    pub state: State,
+    /// Handle for extending the task lease during long-running operations.
+    pub heartbeater: HeartbeatHandle,
+}
