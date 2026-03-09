@@ -745,13 +745,13 @@ impl durable::Task<AppState> for WriteToDbTask {
     ) -> durable::TaskResult<Self::Output> {
         // Use the app state's db pool to write to a table
         let row_id: i64 = ctx
-            .step("insert", params, |params, state| async move {
+            .step("insert", params, |params, step_state| async move {
                 let (id,): (i64,) = sqlx::query_as(
                     "INSERT INTO test_state_table (key, value) VALUES ($1, $2) RETURNING id",
                 )
                 .bind(&params.key)
                 .bind(&params.value)
-                .fetch_one(&state.db_pool)
+                .fetch_one(&step_state.state.db_pool)
                 .await
                 .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
                 Ok(id)
