@@ -2,17 +2,12 @@
 
 mod common;
 
-use durable::{Durable, MIGRATOR};
+use durable::{Durable, DurableBuilder, MIGRATOR};
 use sqlx::PgPool;
 
-/// Helper to create a Durable client from the test pool.
-async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
-    Durable::builder()
-        .pool(pool)
-        .queue_name(queue_name)
-        .build()
-        .await
-        .expect("Failed to create Durable client")
+/// Helper to create a DurableBuilder from the test pool.
+fn create_client(pool: PgPool, queue_name: &str) -> DurableBuilder {
+    Durable::builder().pool(pool).queue_name(queue_name)
 }
 
 // ============================================================================
@@ -21,7 +16,10 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_create_queue_successfully(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "test_queue").await;
+    let client = create_client(pool.clone(), "test_queue")
+        .build()
+        .await
+        .unwrap();
 
     // Create the queue
     client
@@ -38,7 +36,10 @@ async fn test_create_queue_successfully(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_create_queue_is_idempotent(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "idempotent_queue").await;
+    let client = create_client(pool.clone(), "idempotent_queue")
+        .build()
+        .await
+        .unwrap();
 
     // Create the same queue twice - should not error
     client
@@ -60,7 +61,10 @@ async fn test_create_queue_is_idempotent(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_create_queue_with_explicit_name(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "default_queue").await;
+    let client = create_client(pool.clone(), "default_queue")
+        .build()
+        .await
+        .unwrap();
 
     // Create a queue with an explicit name different from default
     client
@@ -80,7 +84,10 @@ async fn test_create_queue_with_explicit_name(pool: PgPool) -> sqlx::Result<()> 
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_drop_queue_removes_it(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "drop_test_queue").await;
+    let client = create_client(pool.clone(), "drop_test_queue")
+        .build()
+        .await
+        .unwrap();
 
     // Create then drop the queue
     client
@@ -101,7 +108,10 @@ async fn test_drop_queue_removes_it(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_drop_queue_with_explicit_name(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "default").await;
+    let client = create_client(pool.clone(), "default")
+        .build()
+        .await
+        .unwrap();
 
     // Create a queue with explicit name
     client
@@ -127,7 +137,10 @@ async fn test_drop_queue_with_explicit_name(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_list_queues_returns_all_created_queues(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "default").await;
+    let client = create_client(pool.clone(), "default")
+        .build()
+        .await
+        .unwrap();
 
     // Create multiple queues
     client
@@ -154,7 +167,10 @@ async fn test_list_queues_returns_all_created_queues(pool: PgPool) -> sqlx::Resu
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_list_queues_empty_initially(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "default").await;
+    let client = create_client(pool.clone(), "default")
+        .build()
+        .await
+        .unwrap();
 
     // Without creating any queues, list should be empty
     let queues = client.list_queues().await.expect("Failed to list queues");
@@ -169,7 +185,10 @@ async fn test_list_queues_empty_initially(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_create_queue_with_underscores(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "queue_with_underscores").await;
+    let client = create_client(pool.clone(), "queue_with_underscores")
+        .build()
+        .await
+        .unwrap();
 
     client
         .create_queue(None)
@@ -184,7 +203,10 @@ async fn test_create_queue_with_underscores(pool: PgPool) -> sqlx::Result<()> {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_create_queue_with_numbers(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "queue123").await;
+    let client = create_client(pool.clone(), "queue123")
+        .build()
+        .await
+        .unwrap();
 
     client
         .create_queue(None)

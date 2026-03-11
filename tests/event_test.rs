@@ -4,20 +4,18 @@ mod common;
 
 use common::helpers::{get_task_state, wait_for_task_terminal};
 use common::tasks::{EventEmitterParams, EventEmitterTask, EventWaitParams, EventWaitingTask};
-use durable::{Durable, DurableEventPayload, MIGRATOR, RetryStrategy, SpawnOptions, WorkerOptions};
+use durable::{
+    Durable, DurableBuilder, DurableEventPayload, MIGRATOR, RetryStrategy, SpawnOptions,
+    WorkerOptions,
+};
 use serde_json::json;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{AssertSqlSafe, Connection, PgConnection, PgPool};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
-    Durable::builder()
-        .pool(pool)
-        .queue_name(queue_name)
-        .build()
-        .await
-        .expect("Failed to create Durable client")
+fn create_client(pool: PgPool, queue_name: &str) -> DurableBuilder {
+    Durable::builder().pool(pool).queue_name(queue_name)
 }
 
 // ============================================================================
@@ -27,9 +25,13 @@ async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
 /// Test that emit_event wakes a task blocked on await_event.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_emit_event_wakes_waiter(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "event_wake").await;
+    let client = create_client(pool.clone(), "event_wake")
+        .register::<EventWaitingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await.unwrap();
 
     // Spawn task that waits for an event
     let spawn_result = client
@@ -95,9 +97,13 @@ async fn test_emit_event_wakes_waiter(pool: PgPool) -> sqlx::Result<()> {
 /// Test that await_event returns immediately if event already exists.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_event_already_emitted_returns_immediately(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "event_pre").await;
+    let client = create_client(pool.clone(), "event_pre")
+        .register::<EventWaitingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await.unwrap();
 
     // Emit the event BEFORE spawning the task
     client
@@ -152,9 +158,13 @@ async fn test_event_already_emitted_returns_immediately(pool: PgPool) -> sqlx::R
 /// Test that await_event times out correctly.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_event_timeout_triggers(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "event_timeout").await;
+    let client = create_client(pool.clone(), "event_timeout")
+        .register::<EventWaitingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await.unwrap();
 
     // Spawn task with short timeout, never emit event
     let spawn_result = client
@@ -201,9 +211,13 @@ async fn test_event_timeout_triggers(pool: PgPool) -> sqlx::Result<()> {
 /// Test that multiple tasks waiting for the same event all wake up.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_multiple_waiters_same_event(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "event_multi").await;
+    let client = create_client(pool.clone(), "event_multi")
+        .register::<EventWaitingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await.unwrap();
 
     // Spawn multiple tasks waiting for the same event
     let task1 = client
@@ -274,9 +288,13 @@ async fn test_event_payload_preserved_on_retry(pool: PgPool) -> sqlx::Result<()>
 
     use common::tasks::{EventThenFailParams, EventThenFailTask, reset_event_then_fail_state};
 
-    let client = create_client(pool.clone(), "event_retry").await;
+    let client = create_client(pool.clone(), "event_retry")
+        .register::<EventThenFailTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EventThenFailTask>().await.unwrap();
 
     reset_event_then_fail_state();
 
@@ -345,9 +363,13 @@ async fn test_event_payload_preserved_on_retry(pool: PgPool) -> sqlx::Result<()>
 /// Subsequent emits for the same event are no-ops to maintain consistency with lost-wakeup prevention.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_event_first_writer_wins(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "event_dedup").await;
+    let client = create_client(pool.clone(), "event_dedup")
+        .register::<EventWaitingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await.unwrap();
 
     // Emit the event twice with different payloads
     client
@@ -408,9 +430,13 @@ async fn test_event_first_writer_wins(pool: PgPool) -> sqlx::Result<()> {
 async fn test_multiple_distinct_events(pool: PgPool) -> sqlx::Result<()> {
     use common::tasks::{MultiEventParams, MultiEventTask};
 
-    let client = create_client(pool.clone(), "event_distinct").await;
+    let client = create_client(pool.clone(), "event_distinct")
+        .register::<MultiEventTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<MultiEventTask>().await.unwrap();
 
     // Spawn task that waits for two events
     let spawn_result = client
@@ -479,9 +505,13 @@ async fn test_multiple_distinct_events(pool: PgPool) -> sqlx::Result<()> {
 async fn test_event_write_does_not_propagate_after_wake(pool: PgPool) -> sqlx::Result<()> {
     use common::tasks::{EventThenDelayParams, EventThenDelayTask};
 
-    let client = create_client(pool.clone(), "event_no_propagate").await;
+    let client = create_client(pool.clone(), "event_no_propagate")
+        .register::<EventThenDelayTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EventThenDelayTask>().await.unwrap();
 
     // Spawn task that waits for event, then delays before completing
     let spawn_result = client
@@ -549,10 +579,15 @@ async fn test_event_write_does_not_propagate_after_wake(pool: PgPool) -> sqlx::R
 /// Test that one task can emit an event that another task awaits.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_emit_from_different_task(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "event_cross").await;
+    let client = create_client(pool.clone(), "event_cross")
+        .register::<EventWaitingTask>()
+        .unwrap()
+        .register::<EventEmitterTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await.unwrap();
-    client.register::<EventEmitterTask>().await.unwrap();
 
     // Spawn the waiter task first
     let waiter = client
@@ -614,7 +649,10 @@ async fn test_emit_from_different_task(pool: PgPool) -> sqlx::Result<()> {
 /// Test that emit_event_with in a committed transaction persists the event.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_emit_event_with_transaction_commit(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "event_tx_commit").await;
+    let client = create_client(pool.clone(), "event_tx_commit")
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
 
     // Create a test table
@@ -663,7 +701,10 @@ async fn test_emit_event_with_transaction_commit(pool: PgPool) -> sqlx::Result<(
 /// Test that emit_event_with in a rolled back transaction does NOT persist the event.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_emit_event_with_transaction_rollback(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "event_tx_rollback").await;
+    let client = create_client(pool.clone(), "event_tx_rollback")
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
 
     // Create a test table
@@ -719,9 +760,13 @@ async fn test_emit_event_with_transaction_rollback(pool: PgPool) -> sqlx::Result
 async fn test_event_timeout_error_payload(pool: PgPool) -> sqlx::Result<()> {
     use common::helpers::get_failed_payload;
 
-    let client = create_client(pool.clone(), "event_timeout_payload").await;
+    let client = create_client(pool.clone(), "event_timeout_payload")
+        .register::<EventWaitingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await.unwrap();
 
     // Spawn task with short timeout, never emit event
     let spawn_result = client
@@ -789,7 +834,10 @@ async fn test_event_timeout_error_payload(pool: PgPool) -> sqlx::Result<()> {
 async fn test_emit_event_with_empty_name_fails(pool: PgPool) -> sqlx::Result<()> {
     use durable::DurableError;
 
-    let client = create_client(pool.clone(), "event_empty_name").await;
+    let client = create_client(pool.clone(), "event_empty_name")
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
 
     // Try to emit event with empty name
@@ -833,9 +881,13 @@ async fn test_event_race_stress(pool: PgPool) -> sqlx::Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(8);
 
-    let client = create_client(pool.clone(), "event_race").await;
+    let client = create_client(pool.clone(), "event_race")
+        .register::<EventWaitingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await.unwrap();
 
     let worker = client
         .start_worker(WorkerOptions {
@@ -880,7 +932,7 @@ async fn test_event_race_stress(pool: PgPool) -> sqlx::Result<()> {
                     // Jitter: vary start times
                     let jitter = Duration::from_micros((i as u64 * 17) % (jitter_ms * 1000));
                     tokio::time::sleep(jitter).await;
-                    let emit_client = create_client(pool, "event_race").await;
+                    let emit_client = create_client(pool, "event_race").build().await.unwrap();
                     emit_client
                         .emit_event::<serde_json::Value>(&event_name, &json!({"idx": i}), None)
                         .await
@@ -1143,9 +1195,13 @@ async fn test_await_emit_event_race_does_not_lose_wakeup(pool: PgPool) -> sqlx::
 /// joiners to see NULL and sleep forever.
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn test_await_event_late_joiner_sees_payload(pool: PgPool) -> sqlx::Result<()> {
-    let client = create_client(pool.clone(), "late_join").await;
+    let client = create_client(pool.clone(), "late_join")
+        .register::<EventWaitingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EventWaitingTask>().await.unwrap();
 
     let event_name = "late-joiner-event";
     let payload = json!({"late": "joiner"});

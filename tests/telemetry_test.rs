@@ -12,7 +12,7 @@ mod common;
 
 use common::helpers::wait_for_task_state;
 use common::tasks::{EchoParams, EchoTask, FailingParams, FailingTask, MultiStepTask};
-use durable::{Durable, MIGRATOR, WorkerOptions};
+use durable::{Durable, DurableBuilder, MIGRATOR, WorkerOptions};
 use metrics_util::CompositeKey;
 use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshot};
 use ordered_float::OrderedFloat;
@@ -20,14 +20,9 @@ use sqlx::PgPool;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-/// Helper to create a Durable client from the test pool.
-async fn create_client(pool: PgPool, queue_name: &str) -> Durable {
-    Durable::builder()
-        .pool(pool)
-        .queue_name(queue_name)
-        .build()
-        .await
-        .expect("Failed to create Durable client")
+/// Helper to create a DurableBuilder from the test pool.
+fn create_client(pool: PgPool, queue_name: &str) -> DurableBuilder {
+    Durable::builder().pool(pool).queue_name(queue_name)
 }
 
 // ============================================================================
@@ -140,9 +135,13 @@ async fn test_task_lifecycle_metrics(pool: PgPool) -> sqlx::Result<()> {
     let snapshotter = get_snapshotter();
     let queue_name = "metrics_lifecycle";
 
-    let client = create_client(pool.clone(), queue_name).await;
+    let client = create_client(pool.clone(), queue_name)
+        .register::<EchoTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await.unwrap();
 
     // Spawn a task
     let spawn_result = client
@@ -227,9 +226,13 @@ async fn test_task_failure_metrics(pool: PgPool) -> sqlx::Result<()> {
     let baseline = snapshotter.snapshot();
     let baseline_failed_count = count_metrics_by_name(baseline, "durable_tasks_failed_total");
 
-    let client = create_client(pool.clone(), "metrics_failure").await;
+    let client = create_client(pool.clone(), "metrics_failure")
+        .register::<FailingTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<FailingTask>().await.unwrap();
 
     // Spawn a task that will fail
     let spawn_result = client
@@ -280,9 +283,13 @@ async fn test_worker_gauge_metrics(pool: PgPool) -> sqlx::Result<()> {
     let snapshotter = get_snapshotter();
     let queue_name = "metrics_worker";
 
-    let client = create_client(pool.clone(), queue_name).await;
+    let client = create_client(pool.clone(), queue_name)
+        .register::<EchoTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await.unwrap();
 
     let worker = client
         .start_worker(WorkerOptions {
@@ -343,9 +350,13 @@ async fn test_checkpoint_metrics(pool: PgPool) -> sqlx::Result<()> {
     let baseline_ckpt_count =
         count_metrics_by_name(baseline, "durable_checkpoint_duration_seconds");
 
-    let client = create_client(pool.clone(), "metrics_checkpoint").await;
+    let client = create_client(pool.clone(), "metrics_checkpoint")
+        .register::<MultiStepTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<MultiStepTask>().await.unwrap();
 
     // MultiStepTask has steps which record checkpoint metrics
     let spawn_result = client
@@ -403,9 +414,13 @@ async fn test_task_execution_duration_metrics(pool: PgPool) -> sqlx::Result<()> 
     let baseline_duration_count =
         count_metrics_by_name(baseline, "durable_task_execution_duration_seconds");
 
-    let client = create_client(pool.clone(), "metrics_exec_dur").await;
+    let client = create_client(pool.clone(), "metrics_exec_dur")
+        .register::<EchoTask>()
+        .unwrap()
+        .build()
+        .await
+        .unwrap();
     client.create_queue(None).await.unwrap();
-    client.register::<EchoTask>().await.unwrap();
 
     let spawn_result = client
         .spawn::<EchoTask>(EchoParams {

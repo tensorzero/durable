@@ -17,9 +17,8 @@ pub struct BenchContext {
 }
 
 impl BenchContext {
-    /// Create a new benchmark context with a unique queue.
-    /// Uses DATABASE_URL environment variable (same as tests).
-    pub async fn new() -> Self {
+    /// Create a new benchmark context, allowing task registration on the builder.
+    pub async fn with_builder(f: impl FnOnce(DurableBuilder) -> DurableBuilder) -> Self {
         let database_url = std::env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5436/test".to_string());
 
@@ -34,9 +33,11 @@ impl BenchContext {
         let counter = QUEUE_COUNTER.fetch_add(1, Ordering::SeqCst);
         let queue_name = format!("bench_{}", counter);
 
-        let client = DurableBuilder::new()
+        let builder = DurableBuilder::new()
             .pool(pool.clone())
-            .queue_name(&queue_name)
+            .queue_name(&queue_name);
+
+        let client = f(builder)
             .build()
             .await
             .expect("Failed to create Durable client");
@@ -53,16 +54,13 @@ impl BenchContext {
         }
     }
 
-    /// Create a new Durable client using the same pool and queue.
-    /// Useful for creating multiple workers.
+    /// Create a new DurableBuilder using the same pool and queue.
+    /// Useful for creating multiple workers with task registrations.
     #[allow(dead_code)]
-    pub async fn new_client(&self) -> Durable {
+    pub fn new_builder(&self) -> DurableBuilder {
         DurableBuilder::new()
             .pool(self.pool.clone())
             .queue_name(&self.queue_name)
-            .build()
-            .await
-            .expect("Failed to create Durable client")
     }
 
     /// Clean up the queue after benchmark
