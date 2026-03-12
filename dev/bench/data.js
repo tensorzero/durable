@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773255926846,
+  "lastUpdate": 1773347851769,
   "repoUrl": "https://github.com/tensorzero/durable",
   "entries": {
     "Criterion Benchmark": [
@@ -4349,6 +4349,156 @@ window.BENCHMARK_DATA = {
             "name": "e2e_completion/single_task_roundtrip",
             "value": 17187241,
             "range": "± 501543",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "aaron@tensorzero.com",
+            "name": "Aaron Hill",
+            "username": "Aaron1011"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d122e6c175ab9ec3509577ba38b569d892f5daae",
+          "message": "Add builder register helper methods that take `&mut self` (#79)\n\nThis will make it easier to register things in tensorzero/tensorzero",
+          "timestamp": "2026-03-12T20:00:32Z",
+          "tree_id": "893d8599c97260db42037c2df657e8083aea8d71",
+          "url": "https://github.com/tensorzero/durable/commit/d122e6c175ab9ec3509577ba38b569d892f5daae"
+        },
+        "date": 1773347851241,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "step_cache_miss/steps/10",
+            "value": 49859369,
+            "range": "± 1359785",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/50",
+            "value": 104379583,
+            "range": "± 2729159",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/100",
+            "value": 165300607,
+            "range": "± 6162589",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/10",
+            "value": 19617845,
+            "range": "± 1610502",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/50",
+            "value": 17906318,
+            "range": "± 3200963",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/100",
+            "value": 17689287,
+            "range": "± 1710869",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1",
+            "value": 35222577,
+            "range": "± 2060711",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/100",
+            "value": 37227636,
+            "range": "± 4179540",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1000",
+            "value": 54326692,
+            "range": "± 2222378",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/2",
+            "value": 801372769,
+            "range": "± 20281241",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/4",
+            "value": 530746240,
+            "range": "± 17760015",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/8",
+            "value": 521005686,
+            "range": "± 19632523",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/16",
+            "value": 523641638,
+            "range": "± 9909011",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/baseline",
+            "value": 219837195,
+            "range": "± 14112917",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/contention",
+            "value": 156962208,
+            "range": "± 2251311",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "spawn_latency/single_spawn",
+            "value": 1171028,
+            "range": "± 858366",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/1",
+            "value": 783184277,
+            "range": "± 21047108",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/2",
+            "value": 544502383,
+            "range": "± 31324421",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/4",
+            "value": 364657959,
+            "range": "± 6225551",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/8",
+            "value": 278067691,
+            "range": "± 5069951",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "e2e_completion/single_task_roundtrip",
+            "value": 18924589,
+            "range": "± 956990",
             "unit": "ns/iter"
           }
         ]
