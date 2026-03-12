@@ -242,6 +242,13 @@ impl<State: Clone + Send + Sync + 'static> DurableBuilder<State> {
         self.register_instance(T::default())
     }
 
+    /// Register a task type via `&mut self`. Required before spawning or processing.
+    ///
+    /// Returns an error if a task with the same name is already registered.
+    pub fn register_mut<T: Task<State> + Default>(&mut self) -> DurableResult<()> {
+        self.register_instance_mut(T::default())
+    }
+
     /// Register a task instance. Required before spawning or processing.
     ///
     /// Use this when you need to register a task with runtime-determined metadata
@@ -249,6 +256,18 @@ impl<State: Clone + Send + Sync + 'static> DurableBuilder<State> {
     ///
     /// Returns an error if a task with the same name is already registered.
     pub fn register_instance<T: Task<State>>(mut self, task: T) -> DurableResult<Self> {
+        self.register_instance_mut(task)?;
+        Ok(self)
+    }
+
+    /// Register a task instance via `&mut self`. Required before spawning or processing.
+    ///
+    /// Use this when you need to register a task with runtime-determined metadata
+    /// (e.g., a TypeScript tool loaded from a config file) and want to use `&mut self`
+    /// instead of the consuming builder pattern.
+    ///
+    /// Returns an error if a task with the same name is already registered.
+    pub fn register_instance_mut<T: Task<State>>(&mut self, task: T) -> DurableResult<()> {
         let name = task.name();
         if self.registry.contains_key(name.as_ref()) {
             return Err(DurableError::TaskAlreadyRegistered {
@@ -256,7 +275,7 @@ impl<State: Clone + Send + Sync + 'static> DurableBuilder<State> {
             });
         }
         self.registry.insert(name, Arc::new(TaskWrapper::new(task)));
-        Ok(self)
+        Ok(())
     }
 
     /// Build the Durable client with application state.
