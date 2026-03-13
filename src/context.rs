@@ -6,6 +6,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use crate::Durable;
+use crate::error::suspend_handle::SuspendMarker;
 use crate::error::{ControlFlow, TaskError, TaskResult};
 use std::sync::Arc;
 
@@ -69,6 +70,24 @@ where
 
     /// Cloneable heartbeat handle for use in step closures.
     heartbeat_handle: HeartbeatHandle,
+
+    /// Whether or not we've suspended the task
+    /// This is set to `true` when we construct a `ControlFlow::Suspend` error type,
+    /// which enforces that we cannot suspend again for this particular execution
+    /// (e.g. until the task is woken up and re-run by a durable worker).
+    /// This blocks incorrect patterns like:
+    /// ```rust
+    /// // Note the lack of '.await' and propagation of the error with `?`
+    /// let fut1 = ctx.sleep_for("first_sleep", Duration::from_secs(1));
+    /// let fut2 = ctx.sleep_for("second_sleep", Duration::from_secs(1));
+    ///
+    /// tokio::join!(fut1, fut2).await;
+    /// ```
+    ///
+    /// Producing `ControlFlow::Suspend` means that we've updated our task suspend
+    /// state in durable, so trying to call `ControlFlow::Suspend` again during the same
+    /// execution will overwrite state in Durable.
+    has_suspended: bool,
 }
 
 /// Validate that a user-provided step name doesn't use reserved prefix.
@@ -85,6 +104,16 @@ impl<State> TaskContext<State>
 where
     State: Clone + Send + Sync + 'static,
 {
+    pub(crate) fn mark_suspended(&mut self) -> TaskResult<()> {
+        if self.has_suspended {
+            return Err(TaskError::Validation {
+                message: "Task has already been suspended during this execution".to_string(),
+            });
+        }
+        self.has_suspended = true;
+        Ok(())
+    }
+
     /// Create a new TaskContext. Called by the worker before executing a task.
     /// Loads all existing checkpoints into the cache.
     #[allow(clippy::too_many_arguments)]
@@ -128,6 +157,7 @@ where
             step_counters: HashMap::new(),
             lease_extender,
             heartbeat_handle,
+            has_suspended: false,
         })
     }
 
@@ -335,7 +365,9 @@ where
                 .map_err(TaskError::from_sqlx_error)?;
 
         if needs_suspend {
-            return Err(TaskError::Control(ControlFlow::Suspend));
+            return Err(TaskError::Control(ControlFlow::Suspend(
+                SuspendMarker::new(self)?,
+            )));
         }
         Ok(())
     }
@@ -414,7 +446,9 @@ where
             .map_err(TaskError::from_sqlx_error)?;
 
         if result.should_suspend {
-            return Err(TaskError::Control(ControlFlow::Suspend));
+            return Err(TaskError::Control(ControlFlow::Suspend(
+                SuspendMarker::new(self)?,
+            )));
         }
 
         // Event arrived - cache and return
@@ -768,7 +802,9 @@ where
             .map_err(TaskError::from_sqlx_error)?;
 
         if result.should_suspend {
-            return Err(TaskError::Control(ControlFlow::Suspend));
+            return Err(TaskError::Control(ControlFlow::Suspend(
+                SuspendMarker::new(self)?,
+            )));
         }
 
         // Event arrived - parse and return

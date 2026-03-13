@@ -481,7 +481,7 @@ impl Worker {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::record_task_completed(&queue_name_for_metrics, &task_name);
             }
-            Err(TaskError::Control(ControlFlow::Suspend)) => {
+            Err(TaskError::Control(ControlFlow::Suspend(_))) => {
                 // Task suspended - do nothing, scheduler will resume it
                 #[cfg(feature = "telemetry")]
                 {
