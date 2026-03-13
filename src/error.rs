@@ -1,6 +1,8 @@
 use serde_json::Value as JsonValue;
 use thiserror::Error;
 
+use crate::error::suspend_handle::SuspendMarker;
+
 /// Signals that interrupt task execution without indicating failure.
 ///
 /// These are not errors - they represent intentional control flow that the worker
@@ -13,7 +15,7 @@ pub enum ControlFlow {
     /// Returned by [`TaskContext::sleep_for`](crate::TaskContext::sleep_for)
     /// and [`TaskContext::await_event`](crate::TaskContext::await_event)
     /// when the task needs to wait.
-    Suspend,
+    Suspend(SuspendMarker),
     /// Task was cancelled.
     ///
     /// Detected when database operations return error code AB001, indicating
@@ -25,6 +27,23 @@ pub enum ControlFlow {
     /// flow to avoid double-failing runs that were already failed by `claim_task`,
     /// and to let the next claim sweep fail the run if it hasn't happened yet.
     LeaseExpired,
+}
+
+pub mod suspend_handle {
+    use crate::{TaskContext, TaskResult};
+
+    // An internal marker type that helps prevent us from constructing `ControlFlow::Suspend` errors
+    // without calling `task_context.mark_suspended()` first.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct SuspendMarker {
+        _private: (),
+    }
+    impl SuspendMarker {
+        pub fn new<S: Clone + Send + Sync>(task_context: &mut TaskContext<S>) -> TaskResult<Self> {
+            task_context.mark_suspended()?;
+            Ok(Self { _private: () })
+        }
+    }
 }
 
 /// Error type for task execution.
