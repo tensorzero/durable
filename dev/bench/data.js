@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773424450130,
+  "lastUpdate": 1773425399016,
   "repoUrl": "https://github.com/tensorzero/durable",
   "entries": {
     "Criterion Benchmark": [
@@ -4649,6 +4649,156 @@ window.BENCHMARK_DATA = {
             "name": "e2e_completion/single_task_roundtrip",
             "value": 18100758,
             "range": "± 653781",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "aaron@tensorzero.com",
+            "name": "Aaron Hill",
+            "username": "Aaron1011"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2bfe26218458a48d1ab15f22a902536402284cf6",
+          "message": "Prevent attempting to suspend multiple times in the same run (#82)\n\nThe durable sql itself already checks that a task is currnetly\nrunning when we try to suspend it, which makes it\nvery difficult to write tests for. However, checking in the durable sql\nis insufficient, since we might have an execution that looks like:\n\n* Tokio task A - calls `await_event(\"foo\")`, and doesn't propagate\n  the `ControlFlow::Suspend` error.\n* Tokio task B (possibly in another process) - calls `emit_event(\"foo\")`\n* Tokio task C - picks up the now-ready task that was previously\n  suspended\n* Tokio task A - calls `await_event(\"bar\")`, which succeeds, since\n  the task is now running.\n\nBy adding a check rust-side, we can be sure that we catch incorrect\nusage of durable",
+          "timestamp": "2026-03-13T17:33:20Z",
+          "tree_id": "02139ec01e5fd590636e357530dda0e3c19799f6",
+          "url": "https://github.com/tensorzero/durable/commit/2bfe26218458a48d1ab15f22a902536402284cf6"
+        },
+        "date": 1773425398132,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "step_cache_miss/steps/10",
+            "value": 48005996,
+            "range": "± 1473044",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/50",
+            "value": 93892098,
+            "range": "± 1773035",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/100",
+            "value": 150678914,
+            "range": "± 2601236",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/10",
+            "value": 16539045,
+            "range": "± 1829236",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/50",
+            "value": 16519781,
+            "range": "± 2331398",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/100",
+            "value": 17344497,
+            "range": "± 1931027",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1",
+            "value": 30515180,
+            "range": "± 1362230",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/100",
+            "value": 32626077,
+            "range": "± 728585",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1000",
+            "value": 51661095,
+            "range": "± 2260051",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/2",
+            "value": 791667950,
+            "range": "± 10136899",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/4",
+            "value": 520722019,
+            "range": "± 11047161",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/8",
+            "value": 490642541,
+            "range": "± 8597727",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/16",
+            "value": 504030235,
+            "range": "± 11173563",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/baseline",
+            "value": 205297282,
+            "range": "± 7050935",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/contention",
+            "value": 152229026,
+            "range": "± 4233571",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "spawn_latency/single_spawn",
+            "value": 1050104,
+            "range": "± 808785",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/1",
+            "value": 688319504,
+            "range": "± 8589605",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/2",
+            "value": 443248645,
+            "range": "± 10340630",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/4",
+            "value": 324251534,
+            "range": "± 3953699",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/8",
+            "value": 253012749,
+            "range": "± 3023831",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "e2e_completion/single_task_roundtrip",
+            "value": 17425543,
+            "range": "± 736668",
             "unit": "ns/iter"
           }
         ]
