@@ -721,6 +721,22 @@ where
         Ok(())
     }
 
+    /// Count unclaimed tasks that are ready to be claimed in a queue.
+    ///
+    /// All of these tasks can be claimed by a running worker on the provided queue.
+    pub async fn count_unclaimed_ready_tasks(
+        &self,
+        queue_name: Option<&str>,
+    ) -> DurableResult<i64> {
+        let queue = queue_name.unwrap_or(&self.queue_name);
+        let query = "SELECT durable.count_unclaimed_ready_tasks($1)";
+        let (count,): (i64,) = sqlx::query_as(query)
+            .bind(queue)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count)
+    }
+
     /// Cancel a task by ID. Running tasks will be cancelled at
     /// their next checkpoint or heartbeat.
     pub async fn cancel_task(&self, task_id: Uuid, queue_name: Option<&str>) -> DurableResult<()> {
