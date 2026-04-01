@@ -112,7 +112,9 @@ mod worker;
 pub use client::{Durable, DurableBuilder};
 pub use context::TaskContext;
 pub use cron::{ScheduleFilter, ScheduleInfo, ScheduleOptions, setup_pgcron};
-pub use error::{ControlFlow, DurableError, DurableResult, TaskError, TaskResult};
+pub use error::{
+    ControlFlow, DurableError, DurableResult, NonControlTaskError, TaskError, TaskResult,
+};
 pub use heartbeat::{HeartbeatHandle, Heartbeater, NoopHeartbeater, StepState};
 pub use task::{ErasedTask, Task, TaskWrapper};
 pub use types::{

@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::error::{TaskError, TaskResult};
+use crate::error::{NonControlTaskError, TaskError, TaskResult};
 use crate::worker::LeaseExtender;
 
 /// Trait for extending task leases during long-running operations.
@@ -64,9 +64,9 @@ impl Heartbeater for HeartbeatHandle {
         let extend_by = duration.unwrap_or(self.claim_timeout);
 
         if extend_by < Duration::from_secs(1) {
-            return Err(TaskError::Validation {
+            return Err(TaskError::NonControl(NonControlTaskError::Validation {
                 message: "heartbeat duration must be at least 1 second".to_string(),
-            });
+            }));
         }
 
         let query = "SELECT durable.extend_claim($1, $2, $3)";

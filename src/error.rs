@@ -46,38 +46,13 @@ pub mod suspend_handle {
     }
 }
 
-/// Error type for task execution.
+/// Non-control-flow error variants for task execution.
 ///
-/// This enum distinguishes between control flow signals (suspension, cancellation)
-/// and actual failures. The worker handles these differently:
-///
-/// - `Control(Suspend)` - Task is waiting; worker does nothing (scheduler will resume it)
-/// - `Control(Cancelled)` - Task was cancelled; worker does nothing
-/// - `Control(LeaseExpired)` - Task lost its lease; worker stops without failing the run
-/// - All other variants - Actual errors; worker records failure and may retry
-///
-/// # Example
-///
-/// ```ignore
-/// match ctx.await_event::<MyPayload>("my-event", Some(Duration::from_secs(30))).await {
-///     Ok(payload) => { /* handle payload */ }
-///     Err(TaskError::Timeout { step_name }) => {
-///         println!("Timed out waiting for {}", step_name);
-///     }
-///     Err(TaskError::Control(ControlFlow::Cancelled)) => {
-///         println!("Task was cancelled");
-///     }
-///     Err(e) => { /* handle other errors */ }
-/// }
-/// ```
+/// These represent actual failures (as opposed to control flow signals like suspension
+/// or cancellation). The worker records these as failures and may retry depending on
+/// [`NonControlTaskError::retryable`].
 #[derive(Debug, Error)]
-pub enum TaskError {
-    /// Control flow signal - not an actual error.
-    ///
-    /// The worker will not mark the task as failed or trigger retries.
-    #[error("control flow: {0:?}")]
-    Control(ControlFlow),
-
+pub enum NonControlTaskError {
     /// The operation timed out.
     ///
     /// Returned by [`TaskContext::await_event`](crate::TaskContext::await_event) when
@@ -170,23 +145,70 @@ pub enum TaskError {
     },
 }
 
-impl TaskError {
+impl NonControlTaskError {
     pub fn retryable(&self) -> bool {
         match self {
             // These are non-deterministic errors, which might succeed on a retry
             // (which will have the same checkpoint cache up to the point of the error)
-            TaskError::Timeout { .. } | TaskError::Database(_) | TaskError::Step { .. } => true,
+            NonControlTaskError::Timeout { .. }
+            | NonControlTaskError::Database(_)
+            | NonControlTaskError::Step { .. } => true,
             // Everything else is considered to be a deterministic error, which will fail again
             // on a retry
-            TaskError::SubtaskSpawnFailed { .. }
-            | TaskError::EmitEventFailed { .. }
-            | TaskError::Control(_)
-            | TaskError::Serialization(_)
-            | TaskError::ChildFailed { .. }
-            | TaskError::ChildCancelled { .. }
-            | TaskError::Validation { .. }
-            | TaskError::User { .. }
-            | TaskError::TaskPanicked { .. } => false,
+            NonControlTaskError::SubtaskSpawnFailed { .. }
+            | NonControlTaskError::EmitEventFailed { .. }
+            | NonControlTaskError::Serialization(_)
+            | NonControlTaskError::ChildFailed { .. }
+            | NonControlTaskError::ChildCancelled { .. }
+            | NonControlTaskError::Validation { .. }
+            | NonControlTaskError::User { .. }
+            | NonControlTaskError::TaskPanicked { .. } => false,
+        }
+    }
+}
+
+/// Error type for task execution.
+///
+/// This enum distinguishes between control flow signals (suspension, cancellation)
+/// and actual failures. The worker handles these differently:
+///
+/// - `Control(Suspend)` - Task is waiting; worker does nothing (scheduler will resume it)
+/// - `Control(Cancelled)` - Task was cancelled; worker does nothing
+/// - `Control(LeaseExpired)` - Task lost its lease; worker stops without failing the run
+/// - `NonControl(_)` - Actual errors; worker records failure and may retry
+///
+/// # Example
+///
+/// ```ignore
+/// match ctx.await_event::<MyPayload>("my-event", Some(Duration::from_secs(30))).await {
+///     Ok(payload) => { /* handle payload */ }
+///     Err(TaskError::NonControl(NonControlTaskError::Timeout { step_name })) => {
+///         println!("Timed out waiting for {}", step_name);
+///     }
+///     Err(TaskError::Control(ControlFlow::Cancelled)) => {
+///         println!("Task was cancelled");
+///     }
+///     Err(e) => { /* handle other errors */ }
+/// }
+/// ```
+#[derive(Debug, Error)]
+pub enum TaskError {
+    /// Control flow signal - not an actual error.
+    ///
+    /// The worker will not mark the task as failed or trigger retries.
+    #[error("control flow: {0:?}")]
+    Control(ControlFlow),
+
+    /// An actual task error (not control flow).
+    #[error("{0}")]
+    NonControl(NonControlTaskError),
+}
+
+impl TaskError {
+    pub fn retryable(&self) -> bool {
+        match self {
+            TaskError::Control(_) => false,
+            TaskError::NonControl(e) => e.retryable(),
         }
     }
 }
@@ -216,25 +238,31 @@ impl TaskError {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| error_data.to_string());
-        TaskError::User {
+        TaskError::NonControl(NonControlTaskError::User {
             message,
             error_data,
-        }
+        })
     }
 
     /// Create a user error from just a message string.
     pub fn user_message(message: impl Into<String>) -> Self {
         let message = message.into();
-        TaskError::User {
+        TaskError::NonControl(NonControlTaskError::User {
             error_data: serde_json::Value::String(message.clone()),
             message,
-        }
+        })
     }
 }
 
 impl From<serde_json::Error> for TaskError {
     fn from(err: serde_json::Error) -> Self {
-        TaskError::Serialization(err)
+        TaskError::NonControl(NonControlTaskError::Serialization(err))
+    }
+}
+
+impl From<NonControlTaskError> for TaskError {
+    fn from(err: NonControlTaskError) -> Self {
+        TaskError::NonControl(err)
     }
 }
 
@@ -247,7 +275,7 @@ impl TaskError {
         } else if is_lease_expired_error(&err) {
             TaskError::Control(ControlFlow::LeaseExpired)
         } else {
-            TaskError::Database(err)
+            TaskError::NonControl(NonControlTaskError::Database(err))
         }
     }
 }
@@ -280,60 +308,67 @@ pub fn serialize_task_error(err: &TaskError) -> JsonValue {
                 "message": err.to_string(),
             })
         }
-        TaskError::Timeout { step_name } => {
+        TaskError::NonControl(inner) => serialize_non_control_task_error(inner),
+    }
+}
+
+/// Serialize a NonControlTaskError for storage in fail_run
+pub fn serialize_non_control_task_error(err: &NonControlTaskError) -> JsonValue {
+    match err {
+        NonControlTaskError::Timeout { step_name } => {
             serde_json::json!({
                 "name": "Timeout",
                 "message": err.to_string(),
                 "step_name": step_name,
             })
         }
-        TaskError::Database(e) => {
+        NonControlTaskError::Database(e) => {
             serde_json::json!({
                 "name": "Database",
                 "message": e.to_string(),
             })
         }
-        TaskError::Serialization(e) => {
+        NonControlTaskError::Serialization(e) => {
             serde_json::json!({
                 "name": "Serialization",
                 "message": e.to_string(),
             })
         }
-        TaskError::SubtaskSpawnFailed { name, error } => {
+        NonControlTaskError::SubtaskSpawnFailed { name, error } => {
             serde_json::json!({
                 "name": "SubtaskSpawnFailed",
                 "message": error.to_string(),
                 "subtask_name": name,
             })
         }
-        TaskError::EmitEventFailed { event_name, error } => {
+        NonControlTaskError::EmitEventFailed { event_name, error } => {
             serde_json::json!({
                 "name": "EmitEventFailed",
                 "message": error.to_string(),
                 "event_name": event_name,
             })
         }
-        TaskError::ChildFailed { step_name, message } => {
+        NonControlTaskError::ChildFailed { step_name, message } => {
             serde_json::json!({
                 "name": "ChildFailed",
                 "message": message,
                 "step_name": step_name,
             })
         }
-        TaskError::ChildCancelled { step_name } => {
+        NonControlTaskError::ChildCancelled { step_name } => {
             serde_json::json!({
                 "name": "ChildCancelled",
                 "message": err.to_string(),
                 "step_name": step_name,
             })
         }
-        TaskError::Validation { message } => {
+        NonControlTaskError::Validation { message } => {
             serde_json::json!({
                 "name": "Validation",
                 "message": message,
             })
         }
-        TaskError::User {
+        NonControlTaskError::User {
             message,
             error_data,
         } => {
@@ -343,14 +378,14 @@ pub fn serialize_task_error(err: &TaskError) -> JsonValue {
                 "error_data": error_data,
             })
         }
-        TaskError::Step { base_name, error } => {
+        NonControlTaskError::Step { base_name, error } => {
             serde_json::json!({
                 "name": "Step",
                 "base_name": base_name,
                 "message": error.to_string(),
             })
         }
-        TaskError::TaskPanicked { message } => {
+        NonControlTaskError::TaskPanicked { message } => {
             serde_json::json!({
                 "name": "TaskPanicked",
                 "message": message,
