@@ -242,10 +242,12 @@ where
             state: self.durable.state().clone(),
             heartbeater: Arc::new(self.heartbeat_handle.clone()),
         };
-        let result = f(params, step_state).await.map_err(|e| TaskError::NonControl(NonControlTaskError::Step {
-            base_name: base_name.to_string(),
-            error: e,
-        }))?;
+        let result = f(params, step_state).await.map_err(|e| {
+            TaskError::NonControl(NonControlTaskError::Step {
+                base_name: base_name.to_string(),
+                error: e,
+            })
+        })?;
 
         // Persist checkpoint (also extends claim lease)
         #[cfg(feature = "telemetry")]
@@ -505,10 +507,12 @@ where
         self.durable
             .emit_event(event_name, payload, None)
             .await
-            .map_err(|e| TaskError::NonControl(NonControlTaskError::EmitEventFailed {
-                event_name: event_name.to_string(),
-                error: e,
-            }))
+            .map_err(|e| {
+                TaskError::NonControl(NonControlTaskError::EmitEventFailed {
+                    event_name: event_name.to_string(),
+                    error: e,
+                })
+            })
     }
 
     /// Get a cloneable heartbeat handle for use in step closures or `SimpleTool`s.
@@ -566,9 +570,11 @@ where
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
             let stored: String = serde_json::from_value(cached.clone())?;
             return Ok(DateTime::parse_from_rfc3339(&stored)
-                .map_err(|e| TaskError::NonControl(NonControlTaskError::Validation {
-                    message: format!("Invalid stored time: {e}"),
-                }))?
+                .map_err(|e| {
+                    TaskError::NonControl(NonControlTaskError::Validation {
+                        message: format!("Invalid stored time: {e}"),
+                    })
+                })?
                 .with_timezone(&Utc));
         }
         let value = Utc::now();
@@ -716,10 +722,12 @@ where
                 },
             )
             .await
-            .map_err(|e| TaskError::NonControl(NonControlTaskError::SubtaskSpawnFailed {
-                name: task_name.to_string(),
-                error: e,
-            }))?;
+            .map_err(|e| {
+                TaskError::NonControl(NonControlTaskError::SubtaskSpawnFailed {
+                    name: task_name.to_string(),
+                    error: e,
+                })
+            })?;
         // Checkpoint the spawn
         self.persist_checkpoint(&checkpoint_name, &spawned_task.task_id)
             .await?;
@@ -829,9 +837,11 @@ where
     ) -> TaskResult<T> {
         match payload.status {
             ChildStatus::Completed => {
-                let result = payload.result.ok_or_else(|| TaskError::NonControl(NonControlTaskError::Validation {
-                    message: "Child completed but no result available".to_string(),
-                }))?;
+                let result = payload.result.ok_or_else(|| {
+                    TaskError::NonControl(NonControlTaskError::Validation {
+                        message: "Child completed but no result available".to_string(),
+                    })
+                })?;
                 Ok(serde_json::from_value(result)?)
             }
             ChildStatus::Failed => {
@@ -844,9 +854,11 @@ where
                     message,
                 }))
             }
-            ChildStatus::Cancelled => Err(TaskError::NonControl(NonControlTaskError::ChildCancelled {
-                step_name: step_name.to_string(),
-            })),
+            ChildStatus::Cancelled => {
+                Err(TaskError::NonControl(NonControlTaskError::ChildCancelled {
+                    step_name: step_name.to_string(),
+                }))
+            }
         }
     }
 }
