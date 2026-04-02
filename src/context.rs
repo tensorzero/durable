@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::Durable;
 use crate::error::suspend_handle::SuspendMarker;
-use crate::error::{ControlFlow, TaskError, TaskResult};
+use crate::error::{ControlFlow, NonControlTaskError, TaskError, TaskResult};
 use std::sync::Arc;
 
 use crate::heartbeat::{HeartbeatHandle, Heartbeater, StepState};
@@ -93,9 +93,9 @@ where
 /// Validate that a user-provided step name doesn't use reserved prefix.
 fn validate_user_name(name: &str) -> TaskResult<()> {
     if name.starts_with('$') {
-        return Err(TaskError::Validation {
+        return Err(TaskError::NonControl(NonControlTaskError::Validation {
             message: "Step names cannot start with '$' (reserved for internal use)".to_string(),
-        });
+        }));
     }
     Ok(())
 }
@@ -106,9 +106,9 @@ where
 {
     pub(crate) fn mark_suspended(&mut self) -> TaskResult<()> {
         if self.has_suspended {
-            return Err(TaskError::Validation {
+            return Err(TaskError::NonControl(NonControlTaskError::Validation {
                 message: "Task has already been suspended during this execution".to_string(),
-            });
+            }));
         }
         self.has_suspended = true;
         Ok(())
@@ -242,9 +242,11 @@ where
             state: self.durable.state().clone(),
             heartbeater: Arc::new(self.heartbeat_handle.clone()),
         };
-        let result = f(params, step_state).await.map_err(|e| TaskError::Step {
-            base_name: base_name.to_string(),
-            error: e,
+        let result = f(params, step_state).await.map_err(|e| {
+            TaskError::NonControl(NonControlTaskError::Step {
+                base_name: base_name.to_string(),
+                error: e,
+            })
         })?;
 
         // Persist checkpoint (also extends claim lease)
@@ -423,9 +425,9 @@ where
         // Check if we were woken by this event but it timed out (null payload)
         if self.task.wake_event.as_deref() == Some(event_name) && self.task.event_payload.is_none()
         {
-            return Err(TaskError::Timeout {
+            return Err(TaskError::NonControl(NonControlTaskError::Timeout {
                 step_name: event_name.to_string(),
-            });
+            }));
         }
 
         // Call await_event stored procedure
@@ -505,9 +507,11 @@ where
         self.durable
             .emit_event(event_name, payload, None)
             .await
-            .map_err(|e| TaskError::EmitEventFailed {
-                event_name: event_name.to_string(),
-                error: e,
+            .map_err(|e| {
+                TaskError::NonControl(NonControlTaskError::EmitEventFailed {
+                    event_name: event_name.to_string(),
+                    error: e,
+                })
             })
     }
 
@@ -566,8 +570,10 @@ where
         if let Some(cached) = self.checkpoint_cache.get(&checkpoint_name) {
             let stored: String = serde_json::from_value(cached.clone())?;
             return Ok(DateTime::parse_from_rfc3339(&stored)
-                .map_err(|e| TaskError::Validation {
-                    message: format!("Invalid stored time: {e}"),
+                .map_err(|e| {
+                    TaskError::NonControl(NonControlTaskError::Validation {
+                        message: format!("Invalid stored time: {e}"),
+                    })
                 })?
                 .with_timezone(&Utc));
         }
@@ -716,9 +722,11 @@ where
                 },
             )
             .await
-            .map_err(|e| TaskError::SubtaskSpawnFailed {
-                name: task_name.to_string(),
-                error: e,
+            .map_err(|e| {
+                TaskError::NonControl(NonControlTaskError::SubtaskSpawnFailed {
+                    name: task_name.to_string(),
+                    error: e,
+                })
             })?;
         // Checkpoint the spawn
         self.persist_checkpoint(&checkpoint_name, &spawned_task.task_id)
@@ -781,9 +789,9 @@ where
         // Check if we were woken by this event but it timed out (null payload)
         if self.task.wake_event.as_deref() == Some(&event_name) && self.task.event_payload.is_none()
         {
-            return Err(TaskError::Timeout {
+            return Err(TaskError::NonControl(NonControlTaskError::Timeout {
                 step_name: step_name.to_string(),
-            });
+            }));
         }
 
         // Call await_event stored procedure (no timeout for join - we wait indefinitely)
@@ -829,8 +837,10 @@ where
     ) -> TaskResult<T> {
         match payload.status {
             ChildStatus::Completed => {
-                let result = payload.result.ok_or_else(|| TaskError::Validation {
-                    message: "Child completed but no result available".to_string(),
+                let result = payload.result.ok_or_else(|| {
+                    TaskError::NonControl(NonControlTaskError::Validation {
+                        message: "Child completed but no result available".to_string(),
+                    })
                 })?;
                 Ok(serde_json::from_value(result)?)
             }
@@ -839,14 +849,16 @@ where
                     .error
                     .and_then(|e| e.get("message").and_then(|m| m.as_str()).map(String::from))
                     .unwrap_or_else(|| "Unknown error".to_string());
-                Err(TaskError::ChildFailed {
+                Err(TaskError::NonControl(NonControlTaskError::ChildFailed {
                     step_name: step_name.to_string(),
                     message,
-                })
+                }))
             }
-            ChildStatus::Cancelled => Err(TaskError::ChildCancelled {
-                step_name: step_name.to_string(),
-            }),
+            ChildStatus::Cancelled => {
+                Err(TaskError::NonControl(NonControlTaskError::ChildCancelled {
+                    step_name: step_name.to_string(),
+                }))
+            }
         }
     }
 }

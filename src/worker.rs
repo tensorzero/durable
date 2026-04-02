@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::Durable;
 use crate::context::TaskContext;
-use crate::error::{ControlFlow, TaskError, serialize_task_error};
+use crate::error::{ControlFlow, NonControlTaskError, TaskError, serialize_task_error};
 use crate::types::{ClaimedTask, ClaimedTaskRow, WorkerOptions};
 
 /// Notifies the worker that the lease has been extended.
@@ -327,9 +327,9 @@ impl Worker {
                     durable.queue_name(),
                     task.task_id,
                     task.run_id,
-                    &TaskError::Validation {
+                    &TaskError::NonControl(NonControlTaskError::Validation {
                         message: format!("Unknown task: {}", task.task_name),
-                    },
+                    }),
                 )
                 .await;
                 return;
@@ -413,7 +413,7 @@ impl Worker {
                     Err(e) => {
                         let message = format!("Task {} panicked: {}", task_label, e);
                         tracing::error!("{}", message);
-                        Some(Err(TaskError::TaskPanicked { message }))
+                        Some(Err(TaskError::NonControl(NonControlTaskError::TaskPanicked { message })))
                     }
                 }
             }
