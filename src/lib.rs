@@ -29,7 +29,7 @@
 //!     type Output = MyOutput;
 //!
 //!     async fn run(&self, params: Self::Params, mut ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
-//!         let doubled = ctx.step("double", || async {
+//!         let doubled = ctx.step("double", params, |params, _| async move {
 //!             Ok(params.value * 2)
 //!         }).await?;
 //!
@@ -47,7 +47,7 @@
 //!
 //!     client.spawn::<MyTask>(MyParams { value: 21 }).await?;
 //!
-//!     let worker = client.start_worker(WorkerOptions::default()).await;
+//!     let worker = client.start_worker(WorkerOptions::default()).await?;
 //!     // ... worker processes tasks until shutdown
 //!     worker.shutdown().await;
 //!     Ok(())
@@ -75,9 +75,11 @@
 //!     type Output = String;
 //!
 //!     async fn run(&self, url: Self::Params, mut ctx: TaskContext, state: AppState) -> TaskResult<Self::Output> {
-//!         ctx.step("fetch", || async {
-//!             state.http_client.get(&url).send().await?.text().await
-//!                 .map_err(|e| anyhow::anyhow!(e))
+//!         ctx.step("fetch", url, |url, _| async move {
+//!             state.http_client.get(&url).send().await
+//!                 .map_err(|e| anyhow::anyhow!("HTTP error: {}", e))?
+//!                 .text().await
+//!                 .map_err(|e| anyhow::anyhow!("HTTP error: {}", e))
 //!         }).await
 //!     }
 //! }
@@ -86,6 +88,7 @@
 //! let app_state = AppState { http_client: reqwest::Client::new() };
 //! let client = Durable::builder()
 //!     .database_url("postgres://localhost/myapp")
+//!     .register::<FetchTask>()?
 //!     .build_with_state(app_state)
 //!     .await?;
 //! ```
