@@ -21,6 +21,7 @@ use crate::error::{TaskError, TaskResult};
 ///
 /// # Example
 /// ```ignore
+/// #[derive(Default)]
 /// struct SendEmailTask;
 ///
 /// #[async_trait]
@@ -30,7 +31,7 @@ use crate::error::{TaskError, TaskResult};
 ///     type Output = SendEmailResult;
 ///
 ///     async fn run(&self, params: Self::Params, mut ctx: TaskContext, _state: ()) -> TaskResult<Self::Output> {
-///         let result = ctx.step("send", || async {
+///         let result = ctx.step("send", params, |params, _| async move {
 ///             email_service::send(&params.to, &params.subject, &params.body).await
 ///         }).await?;
 ///
@@ -44,6 +45,7 @@ use crate::error::{TaskError, TaskResult};
 ///     http_client: reqwest::Client,
 /// }
 ///
+/// #[derive(Default)]
 /// struct FetchUrlTask;
 ///
 /// #[async_trait]
@@ -53,7 +55,7 @@ use crate::error::{TaskError, TaskResult};
 ///     type Output = String;
 ///
 ///     async fn run(&self, url: Self::Params, mut ctx: TaskContext, state: AppState) -> TaskResult<Self::Output> {
-///         let body = ctx.step("fetch", || async {
+///         let body = ctx.step("fetch", url, |url, _| async move {
 ///             state.http_client.get(&url).send().await
 ///                 .map_err(|e| anyhow::anyhow!("HTTP error: {}", e))?
 ///                 .text().await
