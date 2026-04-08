@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775227548054,
+  "lastUpdate": 1775679542026,
   "repoUrl": "https://github.com/tensorzero/durable",
   "entries": {
     "Criterion Benchmark": [
@@ -5249,6 +5249,156 @@ window.BENCHMARK_DATA = {
             "name": "e2e_completion/single_task_roundtrip",
             "value": 15380944,
             "range": "± 958780",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "aaron@tensorzero.com",
+            "name": "Aaron Hill",
+            "username": "Aaron1011"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "06dece0a51bc7ca9a852a1ba26ef747768430352",
+          "message": "Switch sqlx from ring to aws-lc-rs (#87)\n\naws-lc-rs has post-quantum cryptography support,\nwhile ring does not",
+          "timestamp": "2026-04-08T19:41:07Z",
+          "tree_id": "93107a8d6dae7014a73c3c0fe70cf7cd52258bf6",
+          "url": "https://github.com/tensorzero/durable/commit/06dece0a51bc7ca9a852a1ba26ef747768430352"
+        },
+        "date": 1775679541724,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "step_cache_miss/steps/10",
+            "value": 48181638,
+            "range": "± 2339998",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/50",
+            "value": 93060820,
+            "range": "± 1182835",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/100",
+            "value": 145349343,
+            "range": "± 2172346",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/10",
+            "value": 16301676,
+            "range": "± 2042140",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/50",
+            "value": 16064162,
+            "range": "± 3298638",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/100",
+            "value": 17032483,
+            "range": "± 1069593",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1",
+            "value": 34264654,
+            "range": "± 1486831",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/100",
+            "value": 27425956,
+            "range": "± 1223430",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1000",
+            "value": 45390685,
+            "range": "± 3089502",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/2",
+            "value": 758496575,
+            "range": "± 12178522",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/4",
+            "value": 551793440,
+            "range": "± 11664343",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/8",
+            "value": 481096389,
+            "range": "± 8558290",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/16",
+            "value": 479273158,
+            "range": "± 17397072",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/baseline",
+            "value": 196468189,
+            "range": "± 9427552",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/contention",
+            "value": 136827697,
+            "range": "± 8334738",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "spawn_latency/single_spawn",
+            "value": 1015852,
+            "range": "± 799058",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/1",
+            "value": 679969040,
+            "range": "± 5404184",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/2",
+            "value": 416320469,
+            "range": "± 4656712",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/4",
+            "value": 309820253,
+            "range": "± 5047139",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/8",
+            "value": 238419221,
+            "range": "± 2985637",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "e2e_completion/single_task_roundtrip",
+            "value": 16688456,
+            "range": "± 536840",
             "unit": "ns/iter"
           }
         ]
