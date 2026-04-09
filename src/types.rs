@@ -137,6 +137,18 @@ pub struct SpawnOptions {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) parent_task_id: Option<Uuid>,
+
+    /// When true, auto-derive an idempotency key from `hash(task_name, params)`.
+    /// Only the first spawn creates a task; subsequent spawns with identical
+    /// `(task_name, params)` are no-ops that return the existing task.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub only_once: bool,
+
+    /// Explicit idempotency key for deduplication.
+    /// Use when params may differ but the operation is logically the same.
+    /// Takes precedence over `only_once`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<String>,
 }
 
 /// Options for configuring a worker.
