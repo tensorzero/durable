@@ -115,7 +115,7 @@ begin
   execute format('comment on column durable.%I.headers is %L', 't_' || p_queue_name, 'User-defined. Optional key-value metadata as {"key": <any JSON value>}.');
   execute format('comment on column durable.%I.retry_strategy is %L', 't_' || p_queue_name, '{"kind": "none"} | {"kind": "fixed", "base_seconds": <u64>} | {"kind": "exponential", "base_seconds": <u64>, "factor": <f64>, "max_seconds": <u64>}');
   execute format('comment on column durable.%I.cancellation is %L', 't_' || p_queue_name, '{"max_delay": <seconds>, "max_duration": <seconds>} - both optional. max_delay: cancel if not started within N seconds of enqueue. max_duration: cancel if not completed within N seconds of first start.');
-  execute format('comment on column durable.%I.idempotency_key is %L', 't_' || p_queue_name, 'Optional dedup key. When set, only one non-terminal task with this key can exist. Set via SpawnOptions.idempotency_key.');
+  execute format('comment on column durable.%I.idempotency_key is %L', 't_' || p_queue_name, 'Optional dedup key. A key is permanently bound to the first task that uses it — subsequent spawns with the same key always return that task, regardless of state (running, completed, failed, or cancelled). The caller owns retry semantics. Set via SpawnOptions.idempotency_key.');
   execute format('comment on column durable.%I.completed_payload is %L', 't_' || p_queue_name, 'User-defined. Task return value. Schema depends on Task::Output type.');
 
   execute format(
@@ -387,16 +387,19 @@ begin
       end if;
     end if;
     v_cancellation := p_options->'cancellation';
+    -- Extract parent_task_id for subtask tracking
     v_parent_task_id := (p_options->>'parent_task_id')::uuid;
     v_idempotency_key := p_options->>'idempotency_key';
   end if;
 
-  -- Idempotency check: return existing non-terminal task if key matches
+  -- Idempotency check: a key is permanently bound to the first task that uses
+  -- it. Subsequent spawns with the same key always return that task, regardless
+  -- of its state (running, completed, failed, or cancelled). The caller owns
+  -- retry semantics — if you want to retry after a failure, use a new key.
   if v_idempotency_key is not null then
     execute format(
       'select t.task_id from durable.%I t
        where t.idempotency_key = $1
-         and t.state not in (''completed'', ''failed'', ''cancelled'')
        limit 1',
       't_' || p_queue_name
     )

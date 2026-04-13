@@ -140,10 +140,16 @@ pub struct SpawnOptions {
 
     /// Explicit idempotency key for task deduplication.
     ///
-    /// When set, `spawn_task` checks for an existing non-terminal task with the
-    /// same key on this queue. If one exists, its identifiers are returned
-    /// instead of creating a duplicate. This is a first-served semantics:
-    /// multiple clients can safely race to spawn the same logical task.
+    /// When set, `spawn_task` checks for an existing task with the same key on
+    /// this queue. If one exists, its identifiers are returned instead of
+    /// creating a duplicate. This is a first-served semantics: multiple
+    /// clients can safely race to spawn the same logical task.
+    ///
+    /// **A key is permanently bound to the first task that uses it.** This
+    /// match is unconditional on task state — running, completed, failed, and
+    /// cancelled tasks all match. Once a key is used, it can never produce a
+    /// new task. The caller owns retry semantics: to retry a failed operation,
+    /// pick a new key (e.g. by including an attempt number).
     ///
     /// Callers are responsible for choosing a key that captures what "the same
     /// task" means for their use case (e.g. a hash of the inputs they consider
