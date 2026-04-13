@@ -138,15 +138,17 @@ pub struct SpawnOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) parent_task_id: Option<Uuid>,
 
-    /// When true, auto-derive an idempotency key from `hash(task_name, params)`.
-    /// Only the first spawn creates a task; subsequent spawns with identical
-    /// `(task_name, params)` are no-ops that return the existing task.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub only_once: bool,
-
-    /// Explicit idempotency key for deduplication.
-    /// Use when params may differ but the operation is logically the same.
-    /// Takes precedence over `only_once`.
+    /// Explicit idempotency key for task deduplication.
+    ///
+    /// When set, `spawn_task` checks for an existing non-terminal task with the
+    /// same key on this queue. If one exists, its identifiers are returned
+    /// instead of creating a duplicate. This is a first-served semantics:
+    /// multiple clients can safely race to spawn the same logical task.
+    ///
+    /// Callers are responsible for choosing a key that captures what "the same
+    /// task" means for their use case (e.g. a hash of the inputs they consider
+    /// identifying). Other `SpawnOptions` fields like `max_attempts` are
+    /// ignored on subsequent spawns that hit the idempotency check.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
 }

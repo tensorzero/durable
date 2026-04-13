@@ -59,7 +59,7 @@ begin
   execute format('comment on column durable.%I.headers is %L', 't_' || p_queue_name, 'User-defined. Optional key-value metadata as {"key": <any JSON value>}.');
   execute format('comment on column durable.%I.retry_strategy is %L', 't_' || p_queue_name, '{"kind": "none"} | {"kind": "fixed", "base_seconds": <u64>} | {"kind": "exponential", "base_seconds": <u64>, "factor": <f64>, "max_seconds": <u64>}');
   execute format('comment on column durable.%I.cancellation is %L', 't_' || p_queue_name, '{"max_delay": <seconds>, "max_duration": <seconds>} - both optional. max_delay: cancel if not started within N seconds of enqueue. max_duration: cancel if not completed within N seconds of first start.');
-  execute format('comment on column durable.%I.idempotency_key is %L', 't_' || p_queue_name, 'Optional dedup key. When set, only one non-terminal task with this key can exist. Set via SpawnOptions.only_once or SpawnOptions.idempotency_key.');
+  execute format('comment on column durable.%I.idempotency_key is %L', 't_' || p_queue_name, 'Optional dedup key. When set, only one non-terminal task with this key can exist. Set via SpawnOptions.idempotency_key.');
   execute format('comment on column durable.%I.completed_payload is %L', 't_' || p_queue_name, 'User-defined. Task return value. Schema depends on Task::Output type.');
 
   execute format(
@@ -246,12 +246,7 @@ begin
     end if;
     v_cancellation := p_options->'cancellation';
     v_parent_task_id := (p_options->>'parent_task_id')::uuid;
-
-    -- Resolve idempotency key: explicit key takes precedence over only_once
     v_idempotency_key := p_options->>'idempotency_key';
-    if v_idempotency_key is null and (p_options->>'only_once')::boolean = true then
-      v_idempotency_key := md5(p_task_name || '::' || v_params::text);
-    end if;
   end if;
 
   -- Idempotency check: return existing non-terminal task if key matches
