@@ -19,7 +19,7 @@ env:
 
 jobs:
   ci:
-    name: CI
+    name: ci
     runs-on: ubuntu-latest
 
     steps:
