@@ -37,8 +37,9 @@ jobs:
         run: ./scripts/validate-schema
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Check formatting
