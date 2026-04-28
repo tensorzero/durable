@@ -1,3 +1,12 @@
 {
-  "signedContributors": []
+  "signedContributors": [
+    {
+      "name": "GabrielBianconi",
+      "id": 1275491,
+      "comment_id": 4339009678,
+      "created_at": "2026-04-28T20:58:11Z",
+      "repoId": 1107923268,
+      "pullRequestNo": 90
+    }
+  ]
 }
