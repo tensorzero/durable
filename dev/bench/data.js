@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775679542026,
+  "lastUpdate": 1777472383196,
   "repoUrl": "https://github.com/tensorzero/durable",
   "entries": {
     "Criterion Benchmark": [
@@ -5399,6 +5399,156 @@ window.BENCHMARK_DATA = {
             "name": "e2e_completion/single_task_roundtrip",
             "value": 16688456,
             "range": "± 536840",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "1275491+GabrielBianconi@users.noreply.github.com",
+            "name": "Gabriel Bianconi",
+            "username": "GabrielBianconi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dd5b38d68f6a4329e02242e48ea14f25f8599dad",
+          "message": "Harden GHA (#90)\n\n* Harden GHA\n\n* Harden GHA\n\n* Harden GHA\n\n* Harden GHA\n\n* Harden GHA\n\n---------\n\nCo-authored-by: Gabriel Bianconi <GabrielBianconi@users.noreply.github.com>",
+          "timestamp": "2026-04-29T13:43:03Z",
+          "tree_id": "8935e879caaee248e6330eecb87535b3fa71c1e7",
+          "url": "https://github.com/tensorzero/durable/commit/dd5b38d68f6a4329e02242e48ea14f25f8599dad"
+        },
+        "date": 1777472382662,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "step_cache_miss/steps/10",
+            "value": 32970820,
+            "range": "± 1327100",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/50",
+            "value": 75038589,
+            "range": "± 1966208",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_miss/steps/100",
+            "value": 120813822,
+            "range": "± 1879671",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/10",
+            "value": 13062675,
+            "range": "± 1553708",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/50",
+            "value": 13231086,
+            "range": "± 1299163",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "step_cache_hit/steps/100",
+            "value": 13692683,
+            "range": "± 1868406",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1",
+            "value": 24868562,
+            "range": "± 375997",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/100",
+            "value": 24475572,
+            "range": "± 135528",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "large_payload_checkpoint/size_kb/1000",
+            "value": 35987458,
+            "range": "± 428174",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/2",
+            "value": 626136008,
+            "range": "± 12002317",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/4",
+            "value": 440560344,
+            "range": "± 12019977",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/8",
+            "value": 382066928,
+            "range": "± 10117510",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "concurrent_claims/workers/16",
+            "value": 367779217,
+            "range": "± 18735586",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/baseline",
+            "value": 149460324,
+            "range": "± 8909963",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "claim_latency/scenario/contention",
+            "value": 106898894,
+            "range": "± 6703905",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "spawn_latency/single_spawn",
+            "value": 840423,
+            "range": "± 395928",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/1",
+            "value": 566890455,
+            "range": "± 7102834",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/2",
+            "value": 338441726,
+            "range": "± 7508006",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/4",
+            "value": 245178063,
+            "range": "± 5598777",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "task_throughput/workers/8",
+            "value": 190925851,
+            "range": "± 2613736",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "e2e_completion/single_task_roundtrip",
+            "value": 14956628,
+            "range": "± 557865",
             "unit": "ns/iter"
           }
         ]
