@@ -137,6 +137,26 @@ pub struct SpawnOptions {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) parent_task_id: Option<Uuid>,
+
+    /// Explicit idempotency key for task deduplication.
+    ///
+    /// When set, `spawn_task` checks for an existing task with the same key on
+    /// this queue. If one exists, its identifiers are returned instead of
+    /// creating a duplicate. This is a first-served semantics: multiple
+    /// clients can safely race to spawn the same logical task.
+    ///
+    /// **A key is permanently bound to the first task that uses it.** This
+    /// match is unconditional on task state — running, completed, failed, and
+    /// cancelled tasks all match. Once a key is used, it can never produce a
+    /// new task. The caller owns retry semantics: to retry a failed operation,
+    /// pick a new key (e.g. by including an attempt number).
+    ///
+    /// Callers are responsible for choosing a key that captures what "the same
+    /// task" means for their use case (e.g. a hash of the inputs they consider
+    /// identifying). Other `SpawnOptions` fields like `max_attempts` are
+    /// ignored on subsequent spawns that hit the idempotency check.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<String>,
 }
 
 /// Options for configuring a worker.

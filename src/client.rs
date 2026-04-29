@@ -27,6 +27,8 @@ struct SpawnOptionsDb<'a> {
     cancellation: Option<CancellationPolicyDb>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_task_id: Option<&'a Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    idempotency_key: Option<&'a str>,
 }
 
 /// Internal struct for serializing cancellation policy (only non-None fields).
@@ -597,6 +599,7 @@ where
                 .as_ref()
                 .and_then(CancellationPolicyDb::from_policy),
             parent_task_id: options.parent_task_id.as_ref(),
+            idempotency_key: options.idempotency_key.as_deref(),
         };
         serde_json::to_value(db_options)
     }
