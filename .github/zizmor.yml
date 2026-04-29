@@ -1,0 +1,30 @@
+rules:
+  dependabot-cooldown:
+    config:
+      days: 3
+
+  # pinact owns SHA-pinning enforcement; suppress here to avoid duplicate failures.
+  unpinned-uses:
+    ignore:
+      - ci.yml
+      - benchmark.yml
+
+  # dtolnay/rust-toolchain is preferred over plain rustup for its caching and
+  # parallel component install behaviour — keeping it is an explicit choice.
+  superfluous-actions:
+    ignore:
+      - ci.yml
+      - benchmark.yml
+
+  # dtolnay/rust-toolchain publishes only via `master`; no tags exist to pin to,
+  # so a SHA pointing at master is the best available reference.
+  stale-action-refs:
+    ignore:
+      - ci.yml
+      - benchmark.yml
+
+  # The Postgres service container is for ephemeral test/bench use only; pinning
+  # to a SHA256 digest would add maintenance churn with no security benefit.
+  unpinned-images:
+    ignore:
+      - benchmark.yml

@@ -6,11 +6,11 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
 permissions:
-  # deployments permission to deploy GitHub pages website
-  deployments: write
-  # contents permission to update benchmark contents in gh-pages branch
-  contents: write
+  contents: read # checkout
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,6 +20,9 @@ jobs:
   benchmark:
     name: Performance regression check
     runs-on: ubuntu-latest
+    permissions:
+      deployments: write # deploy GitHub Pages website
+      contents: write # update benchmark results in gh-pages branch
 
     services:
       postgres:
@@ -37,16 +40,20 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
 
       - name: Run benchmarks
         run: cargo bench -- --output-format bencher | tee output.txt
 
       - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@a60cea5bc7b49e15c1f58f411161f99e0df48372 # v1.22.0
         with:
           name: Criterion Benchmark
           tool: 'cargo'
